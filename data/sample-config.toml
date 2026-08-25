@@ -1,0 +1,27 @@
+# RustShot config — copy to ~/.config/rustshot/config.toml and tweak.
+# All sections + keys are optional; missing values fall back to defaults.
+#
+# Annotation color and stroke width are deliberately not configurable —
+# the overlay is keyboard-only, hardcoded to red + 4px.
+
+[defaults]
+counter_radius = 16.0                    # auto-counter bubble radius
+pixelate_block = 10                      # pixelate block size in px (min 2)
+save_dir = "~/Pictures/screenshots"      # used when no -p flag is given
+filename_pattern = "%Y%m%d-%H%M%S.png"   # strftime format for auto-generated filenames
+
+[capture]
+include_cursor = false   # composite the X11 cursor into screenshots (XFixes)
+
+[clipboard]
+# When you use -c / copy-to-clipboard, RustShot puts the image on the clipboard
+# as image/png AND writes a copy of the final image to this fixed location.
+# The on-disk copy is great for pasting screenshots into Grok, Claude, Cursor,
+# Windsurf, etc. on Linux: even if the receiving app can't handle raw image/png
+# from the clipboard, you can reliably reference the file with
+# @~/Pictures/screenshots/rustshot-latest.png
+#
+# Set to "" to disable the on-disk copy. The path is deliberately NOT placed on
+# the clipboard: an X11 selection has a single owner, so adding text targets
+# would evict image/png and break pasting the image itself.
+latest_path = "~/Pictures/screenshots/rustshot-latest.png"
