@@ -1,5 +1,5 @@
 //! Overlay state — the data layer: image, selection, annotations, draft,
-//! cached derived data. No X11, no painting.
+//! cached derived data. No painting.
 
 use super::draft::Draft;
 use super::selection::SelectionEdit;
@@ -7,6 +7,7 @@ use super::tool_buttons::Hit;
 use crate::canvas::{render, Annotation, Bounds, Canvas, Pos};
 use crate::config::Config;
 use crate::export;
+use crate::theme::Theme;
 use crate::ui::UiResult;
 use image::RgbaImage;
 use std::sync::Arc;
@@ -65,6 +66,8 @@ pub(super) struct OverlayState {
     pub ctrl_down: bool,
     /// Held Shift constrains Line/Arrow drafts to 45° increments.
     pub shift_down: bool,
+    /// Overlay chrome (frame, strip, hints). Annotations stay red.
+    pub theme: Theme,
 }
 
 impl OverlayState {
@@ -107,6 +110,7 @@ impl OverlayState {
             strip_hover: None,
             ctrl_down: false,
             shift_down: false,
+            theme: Theme::load(),
         }
     }
 

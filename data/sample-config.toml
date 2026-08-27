@@ -1,8 +1,9 @@
-# RustShot config — copy to ~/.config/rustshot/config.toml and tweak.
+# RustShot config — copy to ~/.config/rustshot-wayland/config.toml and tweak.
 # All sections + keys are optional; missing values fall back to defaults.
 #
 # Annotation color and stroke width are deliberately not configurable —
-# the overlay is keyboard-only, hardcoded to red + 4px.
+# drawings stay red + 4px. Overlay chrome (frame, strip, hints) follows the
+# Omarchy theme when ~/.local/state/omarchy/current/theme/colors.toml exists.
 
 [defaults]
 counter_radius = 16.0                    # auto-counter bubble radius
@@ -11,7 +12,7 @@ save_dir = "~/Pictures/screenshots"      # used when no -p flag is given
 filename_pattern = "%Y%m%d-%H%M%S.png"   # strftime format for auto-generated filenames
 
 [capture]
-include_cursor = false   # composite the X11 cursor into screenshots (XFixes)
+include_cursor = false   # include the pointer in single-output captures (libwayshot / grim -c)
 
 [clipboard]
 # When you use -c / copy-to-clipboard, RustShot puts the image on the clipboard
@@ -21,7 +22,6 @@ include_cursor = false   # composite the X11 cursor into screenshots (XFixes)
 # from the clipboard, you can reliably reference the file with
 # @~/Pictures/screenshots/rustshot-latest.png
 #
-# Set to "" to disable the on-disk copy. The path is deliberately NOT placed on
-# the clipboard: an X11 selection has a single owner, so adding text targets
-# would evict image/png and break pasting the image itself.
+# Set to "" to disable the on-disk copy. The path is deliberately not placed on
+# the clipboard: wl-copy is image/png only so pasting still yields the image.
 latest_path = "~/Pictures/screenshots/rustshot-latest.png"

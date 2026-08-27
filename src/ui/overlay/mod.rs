@@ -46,12 +46,6 @@ pub fn show(
         }
     };
 
-    if let Err(e) = win.map() {
-        tracing::error!("wayland map: {e}");
-        let _ = result_tx.send(UiResult::Cancelled);
-        return;
-    }
-
     tracing::info!(
         setup_ms = t0.elapsed().as_millis() as u64,
         w, h,
@@ -67,9 +61,8 @@ pub fn show(
     let mut press_pos = Pos { x: 0.0, y: 0.0 };
     let mut last_cursor = XC_CROSSHAIR;
 
-    // Paint the first frame *before* grabbing. PrtSc is typically still
-    // physically down, so i3 holds the grab and `grab()` burns up to 200ms in
-    // retries — none of which should stand between the user and pixels.
+    // First frame before the pointer cursor is applied so pixels are on
+    // screen as soon as the layer-shell surface is ready.
     paint::composite(&mut display, &state);
     if let Err(e) = win.blit_rgba(display.as_raw()) {
         tracing::error!("first blit failed: {e}");
@@ -81,15 +74,10 @@ pub fn show(
         "first frame blitted"
     );
 
-    if let Err(e) = win.grab() {
-        tracing::error!("wayland grab: {e}");
-        let _ = result_tx.send(UiResult::Cancelled);
-        return;
-    }
     let _ = win.set_cursor(XC_CROSSHAIR);
     tracing::info!(
-        grabbed_ms = t0.elapsed().as_millis() as u64,
-        "input grabbed — overlay interactive"
+        ready_ms = t0.elapsed().as_millis() as u64,
+        "overlay interactive"
     );
 
     let mut pending: Option<Repaint> = None;
@@ -372,9 +360,8 @@ fn on_press(state: &mut OverlayState, p: Pos) -> Dragging {
     }
 }
 
-/// Refresh the tracked modifier state from an event's `state` mask. X reports
-/// the mask as it was *before* the event, so pressing Shift itself doesn't set
-/// it — the motions that follow do, which is all the drag path needs.
+/// Refresh tracked modifiers from the event. The press itself may not include
+/// the newly held bit; following motion events do, which is what the drag path needs.
 fn update_mods(state: &mut OverlayState, ctrl: bool, shift: bool) {
     state.ctrl_down = ctrl;
     state.shift_down = shift;

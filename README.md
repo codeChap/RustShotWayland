@@ -45,3 +45,5 @@ dbus-send --session --type=method_call --dest=org.rustshot.Wayland / \
 ```
 
 Overlay keys match RustShot: drag region, `1`–`8` tools, Enter save, Ctrl+C copy, Esc cancel.
+
+On Omarchy, overlay chrome (selection frame, tool strip, hints, tray) follows the live theme at `~/.local/state/omarchy/current/theme/colors.toml`. Annotation strokes stay red.

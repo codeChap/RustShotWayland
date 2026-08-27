@@ -43,9 +43,8 @@ pub struct Clipboard {
     /// tools that don't read `image/png` from the clipboard well — reference the
     /// file with `@~/Pictures/screenshots/rustshot-latest.png`. Empty disables it.
     ///
-    /// Note: the path is intentionally NOT also placed on the clipboard. An X11
-    /// selection has a single owner, so putting text on it would evict the
-    /// `image/png` target and break pasting the image itself.
+    /// The path is intentionally not also placed on the clipboard — `wl-copy`
+    /// is invoked as `image/png` only so pasting still yields the image.
     pub latest_path: String,
 }
 
@@ -83,7 +82,7 @@ impl Config {
     }
 }
 
-pub fn config_path() -> PathBuf {
+fn config_path() -> PathBuf {
     dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("rustshot-wayland")

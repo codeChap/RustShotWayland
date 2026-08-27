@@ -1,12 +1,9 @@
-//! Status-tray icon. Tries StatusNotifierItem first (KDE / polybar-with-SNI
-//! / `i3status-rust`). If no SNI watcher is on the session bus, falls back
-//! to XEmbed — same pattern Qt uses, which is why Flameshot "just works" on
-//! stock i3bar.
+//! Status-tray icon via StatusNotifierItem (`ksni`). If no SNI watcher is on
+//! the session bus, the daemon continues without a tray.
 //!
-//! The `spawn_capture` helper below is the single entrypoint both backends
-//! use when the icon is clicked. It funnels into `dbus::submit_overlay`, the
-//! same function the `graphicCapture` DBus method uses — so a tray click and
-//! a `dbus-send` invocation produce identical work and identical log lines.
+//! `spawn_capture` is the click entrypoint. It funnels into `dbus::submit_overlay`,
+//! the same function `graphicCapture` uses — tray click and `dbus-send` produce
+//! identical work and log lines.
 
 pub mod sni;
 use crate::capture::WaylandCapture;

@@ -1,6 +1,6 @@
 //! Composite pipeline: start from `base` (captured image + committed pixelates),
 //! apply live annotations + UI chrome (dim, selection frame, handles, strip),
-//! blit to the X11 window.
+//! then blit to the layer-shell surface.
 //!
 //! Display buffer is an `RgbaImage` throughout; tiny-skia temporarily wraps it
 //! via `PixmapMut::from_bytes` for vector work, imageproc takes it directly
@@ -12,7 +12,7 @@ use super::state::OverlayState;
 use super::tool_buttons;
 use crate::canvas::{render, Bounds, Pos};
 use ab_glyph::PxScale;
-use image::{Rgba, RgbaImage};
+use image::RgbaImage;
 use tiny_skia::{Color, FillRule, Paint, PathBuilder, PixmapMut, Stroke, Transform};
 
 pub(super) fn composite(display: &mut RgbaImage, state: &OverlayState) {
@@ -34,12 +34,12 @@ pub(super) fn composite(display: &mut RgbaImage, state: &OverlayState) {
         paint_draft(display, draft, state, Pos { x: 0.0, y: 0.0 });
     }
     if let Some(sel) = state.selection {
-        paint_selection_frame(display, sel);
-        paint_handles(display, sel);
+        paint_selection_frame(display, sel, &state.theme);
+        paint_handles(display, sel, &state.theme);
         let strip = tool_buttons::strip_rect(display.width(), display.height(), sel);
-        tool_buttons::paint(display, strip, state.canvas.tool, state.strip_hover);
+        tool_buttons::paint(display, strip, state.canvas.tool, state.strip_hover, &state.theme);
     } else {
-        paint_hint_text(display);
+        paint_hint_text(display, &state.theme);
     }
 }
 
@@ -119,13 +119,13 @@ pub(super) fn composite_dirty(
     }
     if let Some(sel) = state.selection {
         let local = sel.translate(-origin.x, -origin.y);
-        paint_selection_frame(&mut tile, local);
-        paint_handles(&mut tile, local);
+        paint_selection_frame(&mut tile, local, &state.theme);
+        paint_handles(&mut tile, local, &state.theme);
         let strip = tool_buttons::strip_rect(dw, dh, sel).translate(-origin.x, -origin.y);
-        tool_buttons::paint(&mut tile, strip, state.canvas.tool, state.strip_hover);
+        tool_buttons::paint(&mut tile, strip, state.canvas.tool, state.strip_hover, &state.theme);
     } else {
         // Hint is in screen space; draw it shifted onto the tile if it overlaps.
-        paint_hint_text_at(&mut tile, dw, dh, origin);
+        paint_hint_text_at(&mut tile, dw, dh, origin, &state.theme);
     }
 
     copy_rect(&tile, display, 0, 0, x, y, rw, rh);
@@ -185,22 +185,22 @@ fn copy_rect(
     }
 }
 
-fn paint_selection_frame(display: &mut RgbaImage, sel: Bounds) {
+fn paint_selection_frame(display: &mut RgbaImage, sel: Bounds, theme: &crate::theme::Theme) {
     let w = display.width();
     let h = display.height();
     let buf = display.as_mut();
     let Some(mut pm) = PixmapMut::from_bytes(buf, w, h) else { return; };
-    let yellow = Color::from_rgba8(255, 200, 0, 255);
-    stroke_rect_px(&mut pm, sel.x, sel.y, sel.w, sel.h, yellow, 2.0);
+    let accent = crate::theme::skia(theme.accent);
+    stroke_rect_px(&mut pm, sel.x, sel.y, sel.w, sel.h, accent, 2.0);
 }
 
-fn paint_handles(display: &mut RgbaImage, sel: Bounds) {
+fn paint_handles(display: &mut RgbaImage, sel: Bounds, theme: &crate::theme::Theme) {
     let w = display.width();
     let h = display.height();
     let buf = display.as_mut();
     let Some(mut pm) = PixmapMut::from_bytes(buf, w, h) else { return; };
-    let fill = Color::WHITE;
-    let stroke = Color::from_rgba8(255, 200, 0, 255);
+    let fill = crate::theme::skia(theme.handle_fill());
+    let stroke = crate::theme::skia(theme.accent);
     let s = HANDLE_VISUAL;
     for (_, hx, hy) in handle_corner_positions(sel) {
         let rx = hx - s * 0.5;
@@ -210,13 +210,19 @@ fn paint_handles(display: &mut RgbaImage, sel: Bounds) {
     }
 }
 
-fn paint_hint_text(display: &mut RgbaImage) {
+fn paint_hint_text(display: &mut RgbaImage, theme: &crate::theme::Theme) {
     let w = display.width();
     let h = display.height();
-    paint_hint_text_at(display, w, h, Pos { x: 0.0, y: 0.0 });
+    paint_hint_text_at(display, w, h, Pos { x: 0.0, y: 0.0 }, theme);
 }
 
-fn paint_hint_text_at(display: &mut RgbaImage, screen_w: u32, screen_h: u32, origin: Pos) {
+fn paint_hint_text_at(
+    display: &mut RgbaImage,
+    screen_w: u32,
+    screen_h: u32,
+    origin: Pos,
+    theme: &crate::theme::Theme,
+) {
     let w = screen_w as f32;
     let h = screen_h as f32;
     let font = render::font();
@@ -241,8 +247,8 @@ fn paint_hint_text_at(display: &mut RgbaImage, screen_w: u32, screen_h: u32, ori
     let top = (h * 0.5 - block_h * 0.5) as i32 - origin.y as i32;
 
     let title = "RUST SHOT";
-    let title_color = Rgba([255u8, 255, 255, 255]);
-    let body_color = Rgba([210u8, 210, 210, 255]);
+    let title_color = crate::theme::rgba(theme.bright_foreground);
+    let body_color = crate::theme::rgba(theme.foreground);
     let (tw, _) = imageproc::drawing::text_size(title_scale, font, title);
     let tx = (w * 0.5 - tw as f32 * 0.5) as i32 - origin.x as i32;
     imageproc::drawing::draw_text_mut(display, title_color, tx, top, title_scale, font, title);

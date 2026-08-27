@@ -2,6 +2,7 @@
 //! has been selected. Six tool buttons, a separator, then Save + Copy.
 
 use crate::canvas::{render, widget, Bounds, Pos, ToolKind};
+use crate::theme::Theme;
 use ab_glyph::PxScale;
 use image::{Rgba, RgbaImage};
 use tiny_skia::{
@@ -80,6 +81,7 @@ pub(super) fn paint(
     strip: Bounds,
     active: Option<ToolKind>,
     hover: Option<Hit>,
+    theme: &Theme,
 ) {
     let w = display.width();
     let h = display.height();
@@ -92,9 +94,8 @@ pub(super) fn paint(
             None => return,
         };
 
-        // Strip background
-        fill_rect(&mut pm, strip, color(28, 28, 32, 230));
-        stroke_rect(&mut pm, strip, color(90, 90, 108, 255), 1.0);
+        fill_rect(&mut pm, strip, crate::theme::skia(theme.strip_bg()));
+        stroke_rect(&mut pm, strip, crate::theme::skia(theme.muted), 1.0);
 
         let mut x = strip.x + PAD;
         let y = strip.y + PAD;
@@ -102,7 +103,7 @@ pub(super) fn paint(
         for &tool in ToolKind::ALL.iter() {
             let is_active = active == Some(tool);
             let is_hover = matches!(hover, Some(Hit::Tool(h)) if h == tool);
-            draw_button(&mut pm, x, y, BUTTON_D, is_active, is_hover, |pm, cx, cy, d, fg, bg| {
+            draw_button(&mut pm, x, y, BUTTON_D, is_active, is_hover, theme, |pm, cx, cy, d, fg, bg| {
                 paint_tool_glyph(pm, cx, cy, d, tool, fg, bg);
             });
             x += BUTTON_D + GAP;
@@ -115,29 +116,34 @@ pub(super) fn paint(
             strip.y + 10.0,
             sep_x,
             strip.y + strip.h - 10.0,
-            color(90, 90, 108, 255),
+            crate::theme::skia(theme.muted),
             1.0,
         );
         x += GROUP_GAP;
 
         let is_save_hover = matches!(hover, Some(Hit::Save));
-        draw_button(&mut pm, x, y, BUTTON_D, false, is_save_hover, |pm, cx, cy, d, fg, bg| {
+        draw_button(&mut pm, x, y, BUTTON_D, false, is_save_hover, theme, |pm, cx, cy, d, fg, bg| {
             paint_glyph_save(pm, cx, cy, d, fg, bg);
         });
         x += BUTTON_D + GAP;
 
         let is_copy_hover = matches!(hover, Some(Hit::Copy));
-        draw_button(&mut pm, x, y, BUTTON_D, false, is_copy_hover, |pm, cx, cy, d, fg, bg| {
+        draw_button(&mut pm, x, y, BUTTON_D, false, is_copy_hover, theme, |pm, cx, cy, d, fg, bg| {
             paint_glyph_copy(pm, cx, cy, d, fg, bg);
         });
     }
 
     // Text pass — char glyphs for tools whose button is rendered as text
     // (Counter "1" and the bare-stamp tools !, ?, *).
-    paint_text_labels(display, strip, active);
+    paint_text_labels(display, strip, active, theme);
 }
 
-fn paint_text_labels(display: &mut RgbaImage, strip: Bounds, active: Option<ToolKind>) {
+fn paint_text_labels(
+    display: &mut RgbaImage,
+    strip: Bounds,
+    active: Option<ToolKind>,
+    theme: &Theme,
+) {
     let by = strip.y + PAD;
     let font = render::font();
     for (idx, &tool) in ToolKind::ALL.iter().enumerate() {
@@ -152,9 +158,9 @@ fn paint_text_labels(display: &mut RgbaImage, strip: Bounds, active: Option<Tool
         let bx = strip.x + PAD + idx as f32 * (BUTTON_D + GAP);
         let is_active = active == Some(tool);
         let fg = if is_active {
-            Rgba([0, 0, 0, 255])
+            crate::theme::rgba(theme.on_accent())
         } else {
-            Rgba([255, 255, 255, 255])
+            crate::theme::rgba(theme.bright_foreground)
         };
         let scale = PxScale::from(BUTTON_D * scale_frac);
         let (tw, th) = imageproc::drawing::text_size(scale, font, label);
@@ -173,6 +179,7 @@ fn draw_button<F>(
     d: f32,
     active: bool,
     hover: bool,
+    theme: &Theme,
     paint_glyph: F,
 ) where
     F: FnOnce(&mut PixmapMut, f32, f32, f32, Color, Color),
@@ -181,11 +188,23 @@ fn draw_button<F>(
     let cy = y + d * 0.5;
     let r = d * 0.5;
     let (bg, ring, fg) = if active {
-        (color(255, 200, 0, 255), color(255, 220, 60, 255), color(0, 0, 0, 255))
+        (
+            crate::theme::skia(theme.accent),
+            crate::theme::skia(theme.accent),
+            crate::theme::skia(theme.on_accent()),
+        )
     } else if hover {
-        (color(64, 64, 72, 255), color(200, 200, 220, 255), color(255, 255, 255, 255))
+        (
+            crate::theme::skia(theme.selection),
+            crate::theme::skia(theme.bright_foreground),
+            crate::theme::skia(theme.bright_foreground),
+        )
     } else {
-        (color(48, 48, 56, 255), color(140, 140, 160, 255), color(255, 255, 255, 255))
+        (
+            crate::theme::skia(theme.lighter_background),
+            crate::theme::skia(theme.muted),
+            crate::theme::skia(theme.bright_foreground),
+        )
     };
     fill_circle(pm, cx, cy, r, bg);
     stroke_circle(pm, cx, cy, r, ring, 1.5);
@@ -372,10 +391,6 @@ fn paint_glyph_copy(pm: &mut PixmapMut, cx: f32, cy: f32, d: f32, fg: Color, bg:
 }
 
 // --- tiny-skia helpers -------------------------------------------------------
-
-fn color(r: u8, g: u8, b: u8, a: u8) -> Color {
-    Color::from_rgba8(r, g, b, a)
-}
 
 fn paint_of(c: Color) -> Paint<'static> {
     let mut p = Paint::default();

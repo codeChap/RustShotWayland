@@ -52,7 +52,7 @@ impl WaylandCapture {
         hypr_monitors()
     }
 
-    pub fn cursor_position(&self) -> Result<(i32, i32)> {
+    fn cursor_position(&self) -> Result<(i32, i32)> {
         hypr_cursor().or(Ok((0, 0)))
     }
 
@@ -84,10 +84,6 @@ impl WaylandCapture {
             .into_iter()
             .next()
             .ok_or_else(|| Error::Other("no monitors found".into()))
-    }
-
-    pub fn capture_screen(&self, screen: &Screen) -> Result<RgbaImage> {
-        self.capture_screen_with_cursor(screen, false)
     }
 
     pub fn capture_all(&self) -> Result<RgbaImage> {

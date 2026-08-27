@@ -198,7 +198,7 @@ async fn gui_capture(
 /// loop. The single shared entrypoint for both the DBus `graphicCapture*`
 /// methods and the tray click — same code path, same log line, same gating.
 ///
-/// Sync (it does the blocking X11 capture and a non-blocking channel send).
+/// Sync: blocking capture, then a non-blocking channel send.
 /// Returns the receiver for the overlay's eventual `UiResult`. DBus awaits it
 /// to know when the method call is "done"; the tray drops it (fire-and-forget).
 pub fn submit_overlay(

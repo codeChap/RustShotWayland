@@ -35,7 +35,7 @@ impl ksni::Tray for Tray {
     }
 
     fn icon_pixmap(&self) -> Vec<ksni::Icon> {
-        vec![build_icon()]
+        vec![build_icon(&crate::theme::Theme::load())]
     }
 
     fn activate(&mut self, _x: i32, _y: i32) {
@@ -74,13 +74,15 @@ impl ksni::Tray for Tray {
     }
 }
 
-/// 22×22 ARGB32 icon (network byte order, as SNI requires): yellow selection
-/// frame inside a dark rounded badge. Matches the overlay's frame color.
-fn build_icon() -> ksni::Icon {
+/// 22×22 ARGB32 icon (network byte order, as SNI requires): accent selection
+/// frame inside a theme-background badge.
+fn build_icon(theme: &crate::theme::Theme) -> ksni::Icon {
     const SIZE: i32 = 22;
     let mut data = Vec::with_capacity((SIZE * SIZE * 4) as usize);
     let cx = (SIZE as f32 - 1.0) / 2.0;
     let cy = (SIZE as f32 - 1.0) / 2.0;
+    let acc = theme.accent;
+    let badge = theme.background;
     for y in 0..SIZE {
         for x in 0..SIZE {
             let dx = x as f32 - cx;
@@ -91,9 +93,9 @@ fn build_icon() -> ksni::Icon {
             let in_inner = x >= 6 && x <= 15 && y >= 6 && y <= 15;
             let on_frame = in_outer && !in_inner;
             let (a, r, g, b) = if on_frame {
-                (0xFF, 0xFF, 0xC8, 0x00)
+                (0xFF, acc[0], acc[1], acc[2])
             } else if in_badge {
-                (0xFF, 0x20, 0x20, 0x24)
+                (0xFF, badge[0], badge[1], badge[2])
             } else {
                 (0x00, 0x00, 0x00, 0x00)
             };

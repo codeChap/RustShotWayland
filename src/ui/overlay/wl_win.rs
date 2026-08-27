@@ -107,7 +107,7 @@ impl WlWin {
 
         let surface = compositor.create_surface(&qh);
 
-        // Bind to the output whose geometry matches the captured monitor.
+        // Fullscreen overlay; compositor picks the output (screen_origin is unused).
         let layer = layer_shell.create_layer_surface(
             &qh,
             surface,
@@ -166,15 +166,6 @@ impl WlWin {
             width: width as u32,
             height: height as u32,
         })
-    }
-
-    pub fn map(&mut self) -> Result<()> {
-        Ok(())
-    }
-
-    pub fn grab(&mut self) -> Result<()> {
-        // Exclusive keyboard interactivity was set at create time.
-        Ok(())
     }
 
     pub fn blit_rgba(&mut self, rgba: &[u8]) -> Result<()> {

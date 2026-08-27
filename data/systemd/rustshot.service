@@ -3,7 +3,7 @@ Description=RustShot screenshot daemon
 
 [Service]
 Type=simple
-ExecStart=%h/.cargo/bin/rustshot
+ExecStart=%h/.cargo/bin/rustshot-wayland
 Restart=on-failure
 RestartSec=3
 

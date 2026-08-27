@@ -11,6 +11,7 @@ mod dbus;
 mod error;
 mod export;
 mod logging;
+mod theme;
 mod tray;
 mod ui;
 

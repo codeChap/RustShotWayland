@@ -31,14 +31,6 @@ impl Draft {
     /// Build a draft for `tool` starting at `pos`. Returns `None` for tools that
     /// don't use drag (e.g. Counter fires on click, not drag).
     pub(super) fn new(tool: ToolKind, pos: Pos, style: Style, pixelate_block: u32) -> Option<Self> {
-        if let Some(kind) = tool.widget_kind() {
-            return Some(Draft::Widget {
-                kind,
-                start: pos,
-                end: pos,
-                style,
-            });
-        }
         Some(match tool {
             ToolKind::Pencil => Draft::Pencil { points: vec![pos], style },
             ToolKind::Highlighter => Draft::Pencil { points: vec![pos], style: HIGHLIGHTER_STYLE },
@@ -47,12 +39,17 @@ impl Draft {
             ToolKind::Rect => Draft::Rect { start: pos, end: pos, style },
             ToolKind::Ellipse => Draft::Ellipse { start: pos, end: pos, style },
             ToolKind::Pixelate => Draft::Pixelate { start: pos, end: pos, block: pixelate_block },
+            ToolKind::Widget(kind) => Draft::Widget {
+                kind,
+                start: pos,
+                end: pos,
+                style,
+            },
             // Click-to-place tools — placement happens in on_press, no drag draft.
             ToolKind::Counter
             | ToolKind::Exclaim
             | ToolKind::Question
-            | ToolKind::Asterisk
-            | ToolKind::Widget(_) => return None,
+            | ToolKind::Asterisk => return None,
         })
     }
 
