@@ -62,7 +62,6 @@ async fn dbus_main(
         ui_tx: ui_tx.clone(),
         gui_busy: gui_busy.clone(),
     };
-    let tray_fallback = (capture.clone(), config.clone(), ui_tx.clone(), gui_busy.clone());
     let service = Service { capture, config, ui_tx, gui_busy };
     let built = zbus::connection::Builder::session()?
         .name(SERVICE_NAME)?
@@ -72,11 +71,9 @@ async fn dbus_main(
     let _conn = match built {
         Ok(c) => c,
         Err(zbus::Error::NameTaken) => {
-            eprintln!(
-                "rustshot-wayland: another daemon already owns '{SERVICE_NAME}' on the session bus."
+            tracing::error!(
+                "another daemon already owns '{SERVICE_NAME}' on the session bus; stop it with: pkill -x rustshot-wayland"
             );
-            eprintln!("          Stop it first:");
-            eprintln!("              pkill -x rustshot-wayland");
             return Ok(());
         }
         Err(e) => return Err(e.into()),
@@ -91,7 +88,6 @@ async fn dbus_main(
         }
         Err(e) => {
             tracing::info!("SNI unavailable ({e}); continuing without tray");
-            let _ = tray_fallback;
             None
         }
     };

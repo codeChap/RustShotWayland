@@ -10,20 +10,15 @@ mod daemon;
 mod dbus;
 mod error;
 mod export;
+mod logging;
 mod tray;
 mod ui;
 
 fn main() -> Result<()> {
-    init_tracing();
+    logging::init();
     let cli = cli::Cli::parse();
     match cli.command {
         None => daemon::run(),
         Some(cmd) => client::run(cmd),
     }
-}
-
-fn init_tracing() {
-    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
-    tracing_subscriber::fmt().with_env_filter(filter).init();
 }
