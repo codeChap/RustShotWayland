@@ -28,9 +28,11 @@ pub(super) enum Hit {
 pub(super) fn strip_rect(screen_w: u32, screen_h: u32, sel: Bounds) -> Bounds {
     let tool_n = ToolKind::ALL.len() as f32;
     let action_n = 2.0;
-    let w = tool_n * BUTTON_D + (tool_n - 1.0) * GAP
+    let w = tool_n * BUTTON_D
+        + (tool_n - 1.0) * GAP
         + GROUP_GAP
-        + action_n * BUTTON_D + (action_n - 1.0) * GAP
+        + action_n * BUTTON_D
+        + (action_n - 1.0) * GAP
         + PAD * 2.0;
     let h = BUTTON_D + PAD * 2.0;
     let sw = screen_w as f32;
@@ -103,9 +105,18 @@ pub(super) fn paint(
         for &tool in ToolKind::ALL.iter() {
             let is_active = active == Some(tool);
             let is_hover = matches!(hover, Some(Hit::Tool(h)) if h == tool);
-            draw_button(&mut pm, x, y, BUTTON_D, is_active, is_hover, theme, |pm, cx, cy, d, fg, bg| {
-                paint_tool_glyph(pm, cx, cy, d, tool, fg, bg);
-            });
+            draw_button(
+                &mut pm,
+                x,
+                y,
+                BUTTON_D,
+                is_active,
+                is_hover,
+                theme,
+                |pm, cx, cy, d, fg, bg| {
+                    paint_tool_glyph(pm, cx, cy, d, tool, fg, bg);
+                },
+            );
             x += BUTTON_D + GAP;
         }
 
@@ -122,19 +133,36 @@ pub(super) fn paint(
         x += GROUP_GAP;
 
         let is_save_hover = matches!(hover, Some(Hit::Save));
-        draw_button(&mut pm, x, y, BUTTON_D, false, is_save_hover, theme, |pm, cx, cy, d, fg, bg| {
-            paint_glyph_save(pm, cx, cy, d, fg, bg);
-        });
+        draw_button(
+            &mut pm,
+            x,
+            y,
+            BUTTON_D,
+            false,
+            is_save_hover,
+            theme,
+            |pm, cx, cy, d, fg, bg| {
+                paint_glyph_save(pm, cx, cy, d, fg, bg);
+            },
+        );
         x += BUTTON_D + GAP;
 
         let is_copy_hover = matches!(hover, Some(Hit::Copy));
-        draw_button(&mut pm, x, y, BUTTON_D, false, is_copy_hover, theme, |pm, cx, cy, d, fg, bg| {
-            paint_glyph_copy(pm, cx, cy, d, fg, bg);
-        });
+        draw_button(
+            &mut pm,
+            x,
+            y,
+            BUTTON_D,
+            false,
+            is_copy_hover,
+            theme,
+            |pm, cx, cy, d, fg, bg| {
+                paint_glyph_copy(pm, cx, cy, d, fg, bg);
+            },
+        );
     }
 
-    // Text pass — char glyphs for tools whose button is rendered as text
-    // (Counter "1" and the bare-stamp tools !, ?, *).
+    // Text pass — Counter's "1" is drawn here, not in the vector pass.
     paint_text_labels(display, strip, active, theme);
 }
 
@@ -147,12 +175,8 @@ fn paint_text_labels(
     let by = strip.y + PAD;
     let font = render::font();
     for (idx, &tool) in ToolKind::ALL.iter().enumerate() {
-        // Counter fits inside its circle, so stays small; bare stamps fill the button.
         let (label, scale_frac) = match tool {
             ToolKind::Counter => ("1", 0.42),
-            ToolKind::Exclaim => ("!", 0.58),
-            ToolKind::Question => ("?", 0.58),
-            ToolKind::Asterisk => ("*", 0.58),
             _ => continue,
         };
         let bx = strip.x + PAD + idx as f32 * (BUTTON_D + GAP);
@@ -282,7 +306,12 @@ fn paint_tool_glyph(
             let h = d * 0.40;
             stroke_rect(
                 pm,
-                Bounds { x: cx - w * 0.5, y: cy - h * 0.5, w, h },
+                Bounds {
+                    x: cx - w * 0.5,
+                    y: cy - h * 0.5,
+                    w,
+                    h,
+                },
                 fg,
                 stroke_w,
             );
@@ -305,13 +334,20 @@ fn paint_tool_glyph(
                 }
             }
         }
+        ToolKind::Spotlight => {
+            let u = fg.to_color_u8();
+            let dim = Color::from_rgba8(u.red(), u.green(), u.blue(), 70);
+            let outer = d * 0.48;
+            let inner = d * 0.22;
+            fill_rect_xywh(pm, cx - outer * 0.5, cy - outer * 0.5, outer, outer, dim);
+            fill_rect_xywh(pm, cx - inner * 0.5, cy - inner * 0.5, inner, inner, fg);
+        }
         ToolKind::Counter => {
             // Circle outline only — the "1" digit is drawn by paint_text_labels
             // in the separate text pass.
             stroke_circle(pm, cx, cy, d * 0.28, fg, stroke_w);
         }
-        // Bare-glyph stamps: vector pass draws nothing; the text pass draws the char.
-        ToolKind::Exclaim | ToolKind::Question | ToolKind::Asterisk | ToolKind::Widget(_) => {}
+        ToolKind::Widget(_) => {}
     }
 }
 
@@ -329,7 +365,12 @@ fn paint_glyph_save(pm: &mut PixmapMut, cx: f32, cy: f32, d: f32, fg: Color, _bg
     let h = d * 0.52;
     stroke_rect(
         pm,
-        Bounds { x: cx - w * 0.5, y: cy - h * 0.5, w, h },
+        Bounds {
+            x: cx - w * 0.5,
+            y: cy - h * 0.5,
+            w,
+            h,
+        },
         fg,
         2.0,
     );
@@ -411,11 +452,19 @@ pub(super) fn fill_rect(pm: &mut PixmapMut, b: Bounds, c: Color) {
     if b.w <= 0.0 || b.h <= 0.0 {
         return;
     }
-    let Some(r) = tiny_skia::Rect::from_xywh(b.x, b.y, b.w, b.h) else { return; };
+    let Some(r) = tiny_skia::Rect::from_xywh(b.x, b.y, b.w, b.h) else {
+        return;
+    };
     let mut pb = PathBuilder::new();
     pb.push_rect(r);
     if let Some(path) = pb.finish() {
-        pm.fill_path(&path, &paint_of(c), FillRule::Winding, Transform::identity(), None);
+        pm.fill_path(
+            &path,
+            &paint_of(c),
+            FillRule::Winding,
+            Transform::identity(),
+            None,
+        );
     }
 }
 
@@ -423,20 +472,42 @@ pub(super) fn stroke_rect(pm: &mut PixmapMut, b: Bounds, c: Color, width: f32) {
     if b.w <= 0.0 || b.h <= 0.0 {
         return;
     }
-    let Some(r) = tiny_skia::Rect::from_xywh(b.x, b.y, b.w, b.h) else { return; };
+    let Some(r) = tiny_skia::Rect::from_xywh(b.x, b.y, b.w, b.h) else {
+        return;
+    };
     let mut pb = PathBuilder::new();
     pb.push_rect(r);
     if let Some(path) = pb.finish() {
-        pm.stroke_path(&path, &paint_of(c), &stroke_of(width), Transform::identity(), None);
+        pm.stroke_path(
+            &path,
+            &paint_of(c),
+            &stroke_of(width),
+            Transform::identity(),
+            None,
+        );
     }
 }
 
-pub(super) fn stroke_line(pm: &mut PixmapMut, x0: f32, y0: f32, x1: f32, y1: f32, c: Color, w: f32) {
+pub(super) fn stroke_line(
+    pm: &mut PixmapMut,
+    x0: f32,
+    y0: f32,
+    x1: f32,
+    y1: f32,
+    c: Color,
+    w: f32,
+) {
     let mut pb = PathBuilder::new();
     pb.move_to(x0, y0);
     pb.line_to(x1, y1);
     if let Some(path) = pb.finish() {
-        pm.stroke_path(&path, &paint_of(c), &stroke_of(w), Transform::identity(), None);
+        pm.stroke_path(
+            &path,
+            &paint_of(c),
+            &stroke_of(w),
+            Transform::identity(),
+            None,
+        );
     }
 }
 
@@ -444,7 +515,13 @@ pub(super) fn fill_circle(pm: &mut PixmapMut, cx: f32, cy: f32, r: f32, c: Color
     let mut pb = PathBuilder::new();
     pb.push_circle(cx, cy, r);
     if let Some(path) = pb.finish() {
-        pm.fill_path(&path, &paint_of(c), FillRule::Winding, Transform::identity(), None);
+        pm.fill_path(
+            &path,
+            &paint_of(c),
+            FillRule::Winding,
+            Transform::identity(),
+            None,
+        );
     }
 }
 
@@ -452,7 +529,13 @@ pub(super) fn stroke_circle(pm: &mut PixmapMut, cx: f32, cy: f32, r: f32, c: Col
     let mut pb = PathBuilder::new();
     pb.push_circle(cx, cy, r);
     if let Some(path) = pb.finish() {
-        pm.stroke_path(&path, &paint_of(c), &stroke_of(w), Transform::identity(), None);
+        pm.stroke_path(
+            &path,
+            &paint_of(c),
+            &stroke_of(w),
+            Transform::identity(),
+            None,
+        );
     }
 }
 
@@ -468,10 +551,18 @@ pub(super) fn stroke_ellipse(
     if rx <= 0.0 || ry <= 0.0 {
         return;
     }
-    let Some(r) = tiny_skia::Rect::from_xywh(cx - rx, cy - ry, rx * 2.0, ry * 2.0) else { return; };
+    let Some(r) = tiny_skia::Rect::from_xywh(cx - rx, cy - ry, rx * 2.0, ry * 2.0) else {
+        return;
+    };
     let mut pb = PathBuilder::new();
     pb.push_oval(r);
     if let Some(path) = pb.finish() {
-        pm.stroke_path(&path, &paint_of(c), &stroke_of(w), Transform::identity(), None);
+        pm.stroke_path(
+            &path,
+            &paint_of(c),
+            &stroke_of(w),
+            Transform::identity(),
+            None,
+        );
     }
 }

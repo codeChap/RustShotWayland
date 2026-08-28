@@ -23,6 +23,7 @@ ksni = "0.3"
 
 smithay-client-toolkit = "0.19"
 wayland-client = "0.31"
+libc = "0.2"
 libwayshot = { version = "0.9", default-features = false }
 
 image = { version = "0.25", default-features = false, features = ["png", "pnm"] }

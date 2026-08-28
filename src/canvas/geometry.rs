@@ -46,7 +46,10 @@ impl Bounds {
     }
 
     pub fn nw(self) -> Pos {
-        Pos { x: self.x, y: self.y }
+        Pos {
+            x: self.x,
+            y: self.y,
+        }
     }
 
     pub fn ne(self) -> Pos {
@@ -68,6 +71,16 @@ impl Bounds {
             x: self.x,
             y: self.bottom(),
         }
+    }
+
+    pub fn intersection(self, o: Self) -> Option<Self> {
+        let x = self.x.max(o.x);
+        let y = self.y.max(o.y);
+        let r = self.right().min(o.right());
+        let b = self.bottom().min(o.bottom());
+        let w = r - x;
+        let h = b - y;
+        (w > 0.0 && h > 0.0).then_some(Self { x, y, w, h })
     }
 
     pub fn union(self, o: Self) -> Self {
@@ -116,6 +129,18 @@ impl Bounds {
 
     pub fn area(self) -> f32 {
         self.w.max(0.0) * self.h.max(0.0)
+    }
+
+    /// Inclusive AABB: points on the right/bottom edges count as inside.
+    pub fn contains(self, p: Pos) -> bool {
+        p.x >= self.x && p.x <= self.right() && p.y >= self.y && p.y <= self.bottom()
+    }
+
+    pub fn clamp_pos(self, p: Pos) -> Pos {
+        Pos {
+            x: p.x.max(self.x).min(self.right()),
+            y: p.y.max(self.y).min(self.bottom()),
+        }
     }
 
     /// Pixel rect `(x, y, w, h)` covering this AABB, clamped to the image.
@@ -238,5 +263,56 @@ mod tests {
         let t = a.translate(-10.0, 5.0);
         assert_eq!(t.x, 0.0);
         assert_eq!(t.y, 25.0);
+        let hit = a
+            .intersection(Bounds {
+                x: 15.0,
+                y: 25.0,
+                w: 20.0,
+                h: 20.0,
+            })
+            .unwrap();
+        assert_eq!(hit.x, 15.0);
+        assert_eq!(hit.y, 25.0);
+        assert_eq!(hit.w, 5.0);
+        assert_eq!(hit.h, 5.0);
+        assert!(a
+            .intersection(Bounds {
+                x: 100.0,
+                y: 100.0,
+                w: 10.0,
+                h: 10.0,
+            })
+            .is_none());
+    }
+
+    #[test]
+    fn bounds_contains_inclusive_edges() {
+        let b = Bounds {
+            x: 10.0,
+            y: 20.0,
+            w: 30.0,
+            h: 40.0,
+        };
+        assert!(b.contains(Pos { x: 10.0, y: 20.0 }));
+        assert!(b.contains(Pos { x: 40.0, y: 60.0 }));
+        assert!(b.contains(Pos { x: 25.0, y: 40.0 }));
+        assert!(!b.contains(Pos { x: 9.9, y: 20.0 }));
+        assert!(!b.contains(Pos { x: 40.1, y: 40.0 }));
+    }
+
+    #[test]
+    fn bounds_clamp_pos_pins_to_edges() {
+        let b = Bounds {
+            x: 10.0,
+            y: 20.0,
+            w: 30.0,
+            h: 40.0,
+        };
+        let inside = b.clamp_pos(Pos { x: 15.0, y: 25.0 });
+        assert_eq!(inside.x, 15.0);
+        assert_eq!(inside.y, 25.0);
+        let pinned = b.clamp_pos(Pos { x: 0.0, y: 100.0 });
+        assert_eq!(pinned.x, 10.0);
+        assert_eq!(pinned.y, 60.0);
     }
 }

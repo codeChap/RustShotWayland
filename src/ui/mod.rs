@@ -4,15 +4,18 @@ use crate::config::Config;
 use image::RgbaImage;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 pub enum UiRequest {
     ShowOverlay {
         image: RgbaImage,
         screen_origin: (i32, i32),
+        output_name: String,
         save_path: String,
         clipboard: bool,
         config: Arc<Config>,
         result_tx: tokio::sync::oneshot::Sender<UiResult>,
+        cancel: Arc<AtomicBool>,
         // Held for the lifetime of the overlay; drops release the gui-busy flag
         // so the next PrtSc can start. Dropped when the match arm exits below.
         _busy_guard: Option<BusyGuard>,
@@ -37,6 +40,29 @@ impl BusyGuard {
             .ok()
             .map(|_| BusyGuard(flag.clone()))
     }
+
+    /// Take the overlay slot. If one is already up, ask it to close and wait
+    /// briefly so PrintScr can recover from a stuck/invisible layer.
+    pub fn acquire_or_steal(
+        flag: &Arc<AtomicBool>,
+        cancel: &Arc<AtomicBool>,
+        timeout: Duration,
+    ) -> Option<Self> {
+        if let Some(g) = Self::acquire(flag) {
+            cancel.store(false, Ordering::Release);
+            return Some(g);
+        }
+        cancel.store(true, Ordering::Release);
+        let deadline = Instant::now() + timeout;
+        while Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(50));
+            if let Some(g) = Self::acquire(flag) {
+                cancel.store(false, Ordering::Release);
+                return Some(g);
+            }
+        }
+        None
+    }
 }
 
 impl Drop for BusyGuard {
@@ -51,13 +77,24 @@ pub fn run_event_loop(rx: crossbeam_channel::Receiver<UiRequest>) -> anyhow::Res
             UiRequest::ShowOverlay {
                 image,
                 screen_origin,
+                output_name,
                 save_path,
                 clipboard,
                 config,
                 result_tx,
+                cancel,
                 _busy_guard,
             } => {
-                overlay::show(image, screen_origin, save_path, clipboard, config, result_tx);
+                overlay::show(
+                    image,
+                    screen_origin,
+                    output_name,
+                    save_path,
+                    clipboard,
+                    config,
+                    cancel,
+                    result_tx,
+                );
             }
         }
     }

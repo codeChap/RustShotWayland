@@ -4,7 +4,16 @@
 use crate::canvas::{Bounds, Pos};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Handle { N, S, E, W, NE, NW, SE, SW }
+pub(super) enum Handle {
+    N,
+    S,
+    E,
+    W,
+    NE,
+    NW,
+    SE,
+    SW,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum SelectionEdit {
@@ -32,20 +41,35 @@ pub(super) fn handle_at(rect: Bounds, p: Pos) -> Option<Handle> {
     let t = rect.y;
     let b = rect.y + rect.h;
 
-    let in_corner = |cx: f32, cy: f32| {
-        (p.x - cx).abs() <= CORNER_HIT && (p.y - cy).abs() <= CORNER_HIT
-    };
-    if in_corner(l, t) { return Some(Handle::NW); }
-    if in_corner(r, t) { return Some(Handle::NE); }
-    if in_corner(l, b) { return Some(Handle::SW); }
-    if in_corner(r, b) { return Some(Handle::SE); }
+    let in_corner =
+        |cx: f32, cy: f32| (p.x - cx).abs() <= CORNER_HIT && (p.y - cy).abs() <= CORNER_HIT;
+    if in_corner(l, t) {
+        return Some(Handle::NW);
+    }
+    if in_corner(r, t) {
+        return Some(Handle::NE);
+    }
+    if in_corner(l, b) {
+        return Some(Handle::SW);
+    }
+    if in_corner(r, b) {
+        return Some(Handle::SE);
+    }
 
     let in_x = p.x >= l - EDGE_HIT && p.x <= r + EDGE_HIT;
     let in_y = p.y >= t - EDGE_HIT && p.y <= b + EDGE_HIT;
-    if (p.y - t).abs() <= EDGE_HIT && in_x { return Some(Handle::N); }
-    if (p.y - b).abs() <= EDGE_HIT && in_x { return Some(Handle::S); }
-    if (p.x - l).abs() <= EDGE_HIT && in_y { return Some(Handle::W); }
-    if (p.x - r).abs() <= EDGE_HIT && in_y { return Some(Handle::E); }
+    if (p.y - t).abs() <= EDGE_HIT && in_x {
+        return Some(Handle::N);
+    }
+    if (p.y - b).abs() <= EDGE_HIT && in_x {
+        return Some(Handle::S);
+    }
+    if (p.x - l).abs() <= EDGE_HIT && in_y {
+        return Some(Handle::W);
+    }
+    if (p.x - r).abs() <= EDGE_HIT && in_y {
+        return Some(Handle::E);
+    }
     None
 }
 
@@ -57,18 +81,39 @@ pub(super) fn resize_rect(rect: Bounds, handle: Handle, dx: f32, dy: f32) -> Bou
     let mut r = rect.x + rect.w;
     let mut b = rect.y + rect.h;
     match handle {
-        Handle::N  => t += dy,
-        Handle::S  => b += dy,
-        Handle::E  => r += dx,
-        Handle::W  => l += dx,
-        Handle::NE => { t += dy; r += dx; }
-        Handle::NW => { t += dy; l += dx; }
-        Handle::SE => { r += dx; b += dy; }
-        Handle::SW => { l += dx; b += dy; }
+        Handle::N => t += dy,
+        Handle::S => b += dy,
+        Handle::E => r += dx,
+        Handle::W => l += dx,
+        Handle::NE => {
+            t += dy;
+            r += dx;
+        }
+        Handle::NW => {
+            t += dy;
+            l += dx;
+        }
+        Handle::SE => {
+            r += dx;
+            b += dy;
+        }
+        Handle::SW => {
+            l += dx;
+            b += dy;
+        }
     }
-    if l > r { std::mem::swap(&mut l, &mut r); }
-    if t > b { std::mem::swap(&mut t, &mut b); }
-    Bounds { x: l, y: t, w: r - l, h: b - t }
+    if l > r {
+        std::mem::swap(&mut l, &mut r);
+    }
+    if t > b {
+        std::mem::swap(&mut t, &mut b);
+    }
+    Bounds {
+        x: l,
+        y: t,
+        w: r - l,
+        h: b - t,
+    }
 }
 
 pub(super) fn handle_corner_positions(rect: Bounds) -> [(Handle, f32, f32); 8] {
@@ -80,13 +125,13 @@ pub(super) fn handle_corner_positions(rect: Bounds) -> [(Handle, f32, f32); 8] {
     let b = rect.y + rect.h;
     [
         (Handle::NW, l, t),
-        (Handle::N,  cx, t),
+        (Handle::N, cx, t),
         (Handle::NE, r, t),
-        (Handle::E,  r, cy),
+        (Handle::E, r, cy),
         (Handle::SE, r, b),
-        (Handle::S,  cx, b),
+        (Handle::S, cx, b),
         (Handle::SW, l, b),
-        (Handle::W,  l, cy),
+        (Handle::W, l, cy),
     ]
 }
 
@@ -94,10 +139,10 @@ pub(super) fn handle_corner_positions(rect: Bounds) -> [(Handle, f32, f32); 8] {
 /// See `/usr/include/X11/cursorfont.h`.
 pub(super) fn cursor_glyph_for_handle(h: Handle) -> u16 {
     match h {
-        Handle::N  => 138, // XC_top_side
-        Handle::S  => 16,  // XC_bottom_side
-        Handle::E  => 96,  // XC_right_side
-        Handle::W  => 70,  // XC_left_side
+        Handle::N => 138,  // XC_top_side
+        Handle::S => 16,   // XC_bottom_side
+        Handle::E => 96,   // XC_right_side
+        Handle::W => 70,   // XC_left_side
         Handle::NE => 136, // XC_top_right_corner
         Handle::NW => 134, // XC_top_left_corner
         Handle::SE => 14,  // XC_bottom_right_corner
@@ -219,8 +264,14 @@ mod tests {
     fn cursor_glyphs_are_distinct() {
         use std::collections::HashSet;
         let glyphs: HashSet<_> = [
-            Handle::N, Handle::S, Handle::E, Handle::W,
-            Handle::NE, Handle::NW, Handle::SE, Handle::SW,
+            Handle::N,
+            Handle::S,
+            Handle::E,
+            Handle::W,
+            Handle::NE,
+            Handle::NW,
+            Handle::SE,
+            Handle::SW,
         ]
         .iter()
         .map(|&h| cursor_glyph_for_handle(h))

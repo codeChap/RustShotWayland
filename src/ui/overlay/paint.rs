@@ -10,7 +10,7 @@ use super::draft::Draft;
 use super::selection::{handle_corner_positions, HANDLE_VISUAL};
 use super::state::OverlayState;
 use super::tool_buttons;
-use crate::canvas::{render, Bounds, Pos};
+use crate::canvas::{render, Annotation, Bounds, Pos};
 use ab_glyph::PxScale;
 use image::RgbaImage;
 use tiny_skia::{Color, FillRule, Paint, PathBuilder, PixmapMut, Stroke, Transform};
@@ -18,16 +18,7 @@ use tiny_skia::{Color, FillRule, Paint, PathBuilder, PixmapMut, Stroke, Transfor
 pub(super) fn composite(display: &mut RgbaImage, state: &OverlayState) {
     display.as_mut().copy_from_slice(state.dim_base.as_raw());
     if let Some(sel) = state.selection {
-        copy_rect(
-            &state.base,
-            display,
-            sel.x.max(0.0) as u32,
-            sel.y.max(0.0) as u32,
-            sel.x.max(0.0) as u32,
-            sel.y.max(0.0) as u32,
-            sel.w.max(0.0) as u32,
-            sel.h.max(0.0) as u32,
-        );
+        reveal_selection(display, state, sel, Pos { x: 0.0, y: 0.0 });
     }
     render::rasterize_overlays(display, &state.canvas.annotations);
     if let Some(draft) = &state.draft {
@@ -37,7 +28,13 @@ pub(super) fn composite(display: &mut RgbaImage, state: &OverlayState) {
         paint_selection_frame(display, sel, &state.theme);
         paint_handles(display, sel, &state.theme);
         let strip = tool_buttons::strip_rect(display.width(), display.height(), sel);
-        tool_buttons::paint(display, strip, state.canvas.tool, state.strip_hover, &state.theme);
+        tool_buttons::paint(
+            display,
+            strip,
+            state.canvas.tool,
+            state.strip_hover,
+            &state.theme,
+        );
     } else {
         paint_hint_text(display, &state.theme);
     }
@@ -93,24 +90,7 @@ pub(super) fn composite_dirty(
 
     copy_rect(&state.dim_base, &mut tile, x, y, 0, 0, rw, rh);
     if let Some(sel) = state.selection {
-        if let Some((sx, sy, sw, sh)) = sel.to_px(dw, dh) {
-            let ix = sx.max(x);
-            let iy = sy.max(y);
-            let ir = (sx + sw).min(x + rw);
-            let ib = (sy + sh).min(y + rh);
-            if ir > ix && ib > iy {
-                copy_rect(
-                    &state.base,
-                    &mut tile,
-                    ix,
-                    iy,
-                    ix - x,
-                    iy - y,
-                    ir - ix,
-                    ib - iy,
-                );
-            }
-        }
+        reveal_selection(&mut tile, state, sel, origin);
     }
 
     render::rasterize_overlays_at(&mut tile, &state.canvas.annotations, origin);
@@ -122,7 +102,13 @@ pub(super) fn composite_dirty(
         paint_selection_frame(&mut tile, local, &state.theme);
         paint_handles(&mut tile, local, &state.theme);
         let strip = tool_buttons::strip_rect(dw, dh, sel).translate(-origin.x, -origin.y);
-        tool_buttons::paint(&mut tile, strip, state.canvas.tool, state.strip_hover, &state.theme);
+        tool_buttons::paint(
+            &mut tile,
+            strip,
+            state.canvas.tool,
+            state.strip_hover,
+            &state.theme,
+        );
     } else {
         // Hint is in screen space; draw it shifted onto the tile if it overlaps.
         paint_hint_text_at(&mut tile, dw, dh, origin, &state.theme);
@@ -153,6 +139,54 @@ fn paint_draft(display: &mut RgbaImage, draft: &Draft, state: &OverlayState, ori
     }
 }
 
+fn reveal_selection(display: &mut RgbaImage, state: &OverlayState, sel: Bounds, origin: Pos) {
+    let spots = spotlight_rects(state);
+    if spots.is_empty() {
+        let x = origin.x.max(0.0) as u32;
+        let y = origin.y.max(0.0) as u32;
+        let rw = display.width();
+        let rh = display.height();
+        if let Some((sx, sy, sw, sh)) = sel.to_px(state.base.width(), state.base.height()) {
+            let ix = sx.max(x);
+            let iy = sy.max(y);
+            let ir = (sx + sw).min(x + rw);
+            let ib = (sy + sh).min(y + rh);
+            if ir > ix && ib > iy {
+                copy_rect(
+                    &state.base,
+                    display,
+                    ix,
+                    iy,
+                    ix - x,
+                    iy - y,
+                    ir - ix,
+                    ib - iy,
+                );
+            }
+        }
+        return;
+    }
+    for rect in spots {
+        render::copy_rect_at(&state.base, display, rect, origin, Some(sel));
+    }
+}
+
+fn spotlight_rects(state: &OverlayState) -> Vec<Bounds> {
+    let mut out = Vec::new();
+    for a in &state.canvas.annotations {
+        if let Annotation::Spotlight { rect } = a {
+            out.push(*rect);
+        }
+    }
+    if let Some(Draft::Spotlight { start, end }) = &state.draft {
+        let r = Bounds::from_two(*start, *end);
+        if r.w >= 2.0 && r.h >= 2.0 {
+            out.push(r);
+        }
+    }
+    out
+}
+
 fn copy_rect(
     src: &RgbaImage,
     dst: &mut RgbaImage,
@@ -170,8 +204,12 @@ fn copy_rect(
     let sh = src.height();
     let dw = dst.width();
     let dh = dst.height();
-    let w = w.min(sw.saturating_sub(src_x)).min(dw.saturating_sub(dst_x));
-    let h = h.min(sh.saturating_sub(src_y)).min(dh.saturating_sub(dst_y));
+    let w = w
+        .min(sw.saturating_sub(src_x))
+        .min(dw.saturating_sub(dst_x));
+    let h = h
+        .min(sh.saturating_sub(src_y))
+        .min(dh.saturating_sub(dst_y));
     if w == 0 || h == 0 {
         return;
     }
@@ -189,7 +227,9 @@ fn paint_selection_frame(display: &mut RgbaImage, sel: Bounds, theme: &crate::th
     let w = display.width();
     let h = display.height();
     let buf = display.as_mut();
-    let Some(mut pm) = PixmapMut::from_bytes(buf, w, h) else { return; };
+    let Some(mut pm) = PixmapMut::from_bytes(buf, w, h) else {
+        return;
+    };
     let accent = crate::theme::skia(theme.accent);
     stroke_rect_px(&mut pm, sel.x, sel.y, sel.w, sel.h, accent, 2.0);
 }
@@ -198,7 +238,9 @@ fn paint_handles(display: &mut RgbaImage, sel: Bounds, theme: &crate::theme::The
     let w = display.width();
     let h = display.height();
     let buf = display.as_mut();
-    let Some(mut pm) = PixmapMut::from_bytes(buf, w, h) else { return; };
+    let Some(mut pm) = PixmapMut::from_bytes(buf, w, h) else {
+        return;
+    };
     let fill = crate::theme::skia(theme.handle_fill());
     let stroke = crate::theme::skia(theme.accent);
     let s = HANDLE_VISUAL;
@@ -239,7 +281,7 @@ fn paint_hint_text_at(
         "1 Pencil    2 Highlighter    3 Line    4 Arrow",
         "5 Rect    6 Ellipse    7 Pixelate    8 Counter",
         "Drag inside to move the frame    Drag a handle to resize",
-        "Shift snaps Line + Arrow to 45\u{b0}",
+        "Shift snaps line tools to 10\u{b0}",
         "Ctrl+Z undo    Ctrl+Y redo    Ctrl+C copy    Enter save",
     ];
 
@@ -271,7 +313,9 @@ fn fill_rect_px(pm: &mut PixmapMut, x: f32, y: f32, w: f32, h: f32, c: Color) {
     if w <= 0.0 || h <= 0.0 {
         return;
     }
-    let Some(r) = tiny_skia::Rect::from_xywh(x, y, w, h) else { return; };
+    let Some(r) = tiny_skia::Rect::from_xywh(x, y, w, h) else {
+        return;
+    };
     let mut pb = PathBuilder::new();
     pb.push_rect(r);
     if let Some(path) = pb.finish() {
@@ -303,7 +347,9 @@ fn stroke_rect_px(pm: &mut PixmapMut, x: f32, y: f32, w: f32, h: f32, c: Color, 
     if w <= 0.0 || h <= 0.0 {
         return;
     }
-    let Some(r) = tiny_skia::Rect::from_xywh(x, y, w, h) else { return; };
+    let Some(r) = tiny_skia::Rect::from_xywh(x, y, w, h) else {
+        return;
+    };
     let mut pb = PathBuilder::new();
     pb.push_rect(r);
     if let Some(path) = pb.finish() {

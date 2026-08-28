@@ -25,7 +25,7 @@ pub(super) fn pixelate_key(b: Bounds, block: u32) -> PixelateKey {
     )
 }
 
-#[derive(Default, PartialEq, Eq)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub(super) enum Mode {
     #[default]
     SelectingRegion,
@@ -64,7 +64,8 @@ pub(super) struct OverlayState {
     pub committed_pixelate_sig: Vec<PixelateKey>,
     pub strip_hover: Option<Hit>,
     pub ctrl_down: bool,
-    /// Held Shift constrains Line/Arrow drafts to 45° increments.
+    /// Held Shift constrains line-drawing drafts (pencil, highlighter, line,
+    /// arrow) to 10° increments.
     pub shift_down: bool,
     /// Overlay chrome (frame, strip, hints). Annotations stay red.
     pub theme: Theme,
@@ -138,12 +139,8 @@ impl OverlayState {
             && current.starts_with(&self.committed_pixelate_sig);
 
         if can_append {
-            if let Some((rect, block)) = self
-                .canvas
-                .annotations
-                .iter()
-                .rev()
-                .find_map(|a| match a {
+            if let Some((rect, block)) =
+                self.canvas.annotations.iter().rev().find_map(|a| match a {
                     Annotation::Pixelate { rect, block } => Some((*rect, *block)),
                     _ => None,
                 })
@@ -188,7 +185,12 @@ impl OverlayState {
             self.draft_pixelate_sig = None;
             return;
         }
-        let bounds = Bounds { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+        let bounds = Bounds {
+            x: x0,
+            y: y0,
+            w: x1 - x0,
+            h: y1 - y0,
+        };
         let key = pixelate_key(bounds, *block);
         if self.draft_pixelate_sig == Some(key) && self.draft_pixelate_cache.is_some() {
             return;
@@ -227,7 +229,28 @@ impl OverlayState {
     }
 
     fn compose(&self) -> RgbaImage {
-        let mut working = self.base.clone();
+        let mut working = if self
+            .canvas
+            .annotations
+            .iter()
+            .any(|a| matches!(a, Annotation::Spotlight { .. }))
+        {
+            let mut dimmed = build_dim(&self.base);
+            for a in &self.canvas.annotations {
+                if let Annotation::Spotlight { rect } = a {
+                    render::copy_rect_at(
+                        &self.base,
+                        &mut dimmed,
+                        *rect,
+                        Pos { x: 0.0, y: 0.0 },
+                        None,
+                    );
+                }
+            }
+            dimmed
+        } else {
+            self.base.clone()
+        };
         render::rasterize_overlays(&mut working, &self.canvas.annotations);
         if let Some(sel) = self.selection {
             let (x, y, w, h) = clamp_to_image(sel, self.base.width(), self.base.height());
@@ -249,8 +272,7 @@ fn build_dim(base: &RgbaImage) -> RgbaImage {
         d[2] = s[2] >> 1;
         d[3] = 0xff;
     }
-    RgbaImage::from_raw(base.width(), base.height(), out)
-        .expect("dim buffer length matches image")
+    RgbaImage::from_raw(base.width(), base.height(), out).expect("dim buffer length matches image")
 }
 
 fn clamp_to_image(sel: Bounds, max_w: u32, max_h: u32) -> (u32, u32, u32, u32) {

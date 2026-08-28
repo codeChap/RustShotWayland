@@ -13,10 +13,12 @@ pub fn run() -> Result<()> {
     // Single "an overlay is active" flag shared by dbus and tray entry points.
     // Stops repeated PrtSc presses from queueing overlays behind the live one.
     let gui_busy = Arc::new(AtomicBool::new(false));
+    let overlay_cancel = Arc::new(AtomicBool::new(false));
 
     let capture_for_dbus = capture.clone();
     let config_for_dbus = config.clone();
     let gui_busy_for_dbus = gui_busy.clone();
+    let overlay_cancel_for_dbus = overlay_cancel.clone();
     std::thread::Builder::new()
         .name("rustshot-dbus".into())
         .spawn(move || {
@@ -36,6 +38,7 @@ pub fn run() -> Result<()> {
                     config_for_dbus.clone(),
                     ui_tx.clone(),
                     gui_busy_for_dbus.clone(),
+                    overlay_cancel_for_dbus.clone(),
                 )) {
                     tracing::error!("dbus thread crashed: {e}; restarting in 5s...");
                     std::thread::sleep(std::time::Duration::from_secs(5));
@@ -55,14 +58,22 @@ async fn dbus_main(
     config: Arc<Config>,
     ui_tx: crossbeam_channel::Sender<ui::UiRequest>,
     gui_busy: Arc<AtomicBool>,
+    overlay_cancel: Arc<AtomicBool>,
 ) -> Result<()> {
     let sni_tray = crate::tray::sni::Tray {
         capture: capture.clone(),
         config: config.clone(),
         ui_tx: ui_tx.clone(),
         gui_busy: gui_busy.clone(),
+        overlay_cancel: overlay_cancel.clone(),
     };
-    let service = Service { capture, config, ui_tx, gui_busy };
+    let service = Service {
+        capture,
+        config,
+        ui_tx,
+        gui_busy,
+        overlay_cancel,
+    };
     let built = zbus::connection::Builder::session()?
         .name(SERVICE_NAME)?
         .serve_at(OBJECT_PATH, service)?

@@ -1973,6 +1973,7 @@ dependencies = [
  "image",
  "imageproc",
  "ksni",
+ "libc",
  "libwayshot",
  "serde",
  "serde_json",

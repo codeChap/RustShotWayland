@@ -8,7 +8,7 @@
 pub mod sni;
 use crate::capture::WaylandCapture;
 use crate::config::{self, Config};
-use crate::ui::{BusyGuard, UiRequest};
+use crate::ui::UiRequest;
 use crossbeam_channel::Sender;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -20,11 +20,8 @@ pub(super) fn spawn_capture(
     config: Arc<Config>,
     ui_tx: Sender<UiRequest>,
     gui_busy: Arc<AtomicBool>,
+    overlay_cancel: Arc<AtomicBool>,
 ) {
-    let Some(guard) = BusyGuard::acquire(&gui_busy) else {
-        tracing::info!("capture ignored — overlay already active");
-        return;
-    };
     std::thread::Builder::new()
         .name("rustshot-tray-capture".into())
         .spawn(move || {
@@ -36,9 +33,15 @@ pub(super) fn spawn_capture(
             .into_owned();
             // Fire-and-forget: drop the receiver, the tray doesn't care about
             // the overlay's UiResult.
-            if let Err(e) =
-                crate::dbus::submit_overlay(capture.as_ref(), config, &ui_tx, path, true, guard)
-            {
+            if let Err(e) = crate::dbus::submit_overlay(
+                capture.as_ref(),
+                config,
+                &ui_tx,
+                path,
+                true,
+                gui_busy,
+                overlay_cancel,
+            ) {
                 tracing::error!("tray capture: {e}");
             }
         })

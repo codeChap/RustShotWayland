@@ -14,6 +14,7 @@ pub struct Tray {
     pub config: Arc<Config>,
     pub ui_tx: Sender<UiRequest>,
     pub gui_busy: Arc<AtomicBool>,
+    pub overlay_cancel: Arc<AtomicBool>,
 }
 
 impl ksni::Tray for Tray {
@@ -44,6 +45,7 @@ impl ksni::Tray for Tray {
             self.config.clone(),
             self.ui_tx.clone(),
             self.gui_busy.clone(),
+            self.overlay_cancel.clone(),
         );
     }
 
@@ -58,6 +60,7 @@ impl ksni::Tray for Tray {
                         this.config.clone(),
                         this.ui_tx.clone(),
                         this.gui_busy.clone(),
+                        this.overlay_cancel.clone(),
                     );
                 }),
                 ..Default::default()

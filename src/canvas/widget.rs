@@ -102,7 +102,12 @@ mod tests {
     use super::*;
 
     fn b(w: f32, h: f32) -> Bounds {
-        Bounds { x: 10.0, y: 20.0, w, h }
+        Bounds {
+            x: 10.0,
+            y: 20.0,
+            w,
+            h,
+        }
     }
 
     #[test]

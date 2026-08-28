@@ -29,6 +29,8 @@ use smithay_client_toolkit::{
     },
 };
 use std::collections::VecDeque;
+use std::os::fd::AsRawFd;
+use std::sync::atomic::{AtomicBool, Ordering};
 use wayland_client::{
     globals::registry_queue_init,
     protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_shm, wl_surface},
@@ -55,11 +57,33 @@ const BTN_LEFT: u32 = 0x110;
 #[derive(Debug, Clone)]
 pub(super) enum WlEvent {
     Expose,
-    KeyPress { keysym: u32, ctrl: bool, shift: bool },
-    KeyRelease { ctrl: bool, shift: bool },
-    ButtonPress { x: f32, y: f32, ctrl: bool, shift: bool },
-    ButtonRelease { x: f32, y: f32, ctrl: bool, shift: bool },
-    Motion { x: f32, y: f32, ctrl: bool, shift: bool },
+    KeyPress {
+        keysym: u32,
+        ctrl: bool,
+        shift: bool,
+    },
+    KeyRelease {
+        ctrl: bool,
+        shift: bool,
+    },
+    ButtonPress {
+        x: f32,
+        y: f32,
+        ctrl: bool,
+        shift: bool,
+    },
+    ButtonRelease {
+        x: f32,
+        y: f32,
+        ctrl: bool,
+        shift: bool,
+    },
+    Motion {
+        x: f32,
+        y: f32,
+        ctrl: bool,
+        shift: bool,
+    },
 }
 
 pub(super) struct WlWin {
@@ -77,7 +101,8 @@ struct WinState {
     compositor: CompositorState,
     shm: Shm,
     pool: SlotPool,
-    layer: LayerSurface,
+    layer: Option<LayerSurface>,
+    attached_output: Option<wl_output::WlOutput>,
     events: VecDeque<WlEvent>,
     configured: bool,
     closed: bool,
@@ -92,7 +117,7 @@ struct WinState {
 }
 
 impl WlWin {
-    pub fn new(screen_origin: (i32, i32), width: u16, height: u16) -> Result<Self> {
+    pub fn new(screen_origin: (i32, i32), output_name: &str, width: u16, height: u16) -> Result<Self> {
         let conn = Connection::connect_to_env()
             .map_err(|e| Error::Other(format!("wayland connect: {e}")))?;
         let (globals, mut event_queue) = registry_queue_init(&conn)
@@ -101,25 +126,12 @@ impl WlWin {
 
         let compositor = CompositorState::bind(&globals, &qh)
             .map_err(|e| Error::Other(format!("wl_compositor: {e}")))?;
-        let layer_shell = LayerShell::bind(&globals, &qh)
-            .map_err(|e| Error::Other(format!("layer-shell unavailable: {e} (need Hyprland / wlroots)")))?;
+        let layer_shell = LayerShell::bind(&globals, &qh).map_err(|e| {
+            Error::Other(format!(
+                "layer-shell unavailable: {e} (need Hyprland / wlroots)"
+            ))
+        })?;
         let shm = Shm::bind(&globals, &qh).map_err(|e| Error::Other(format!("wl_shm: {e}")))?;
-
-        let surface = compositor.create_surface(&qh);
-
-        // Fullscreen overlay; compositor picks the output (screen_origin is unused).
-        let layer = layer_shell.create_layer_surface(
-            &qh,
-            surface,
-            Layer::Overlay,
-            Some("rustshot"),
-            None,
-        );
-        layer.set_anchor(Anchor::TOP | Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT);
-        layer.set_keyboard_interactivity(KeyboardInteractivity::Exclusive);
-        layer.set_exclusive_zone(-1);
-        layer.set_size(width as u32, height as u32);
-        layer.commit();
 
         let pool = SlotPool::new((width as usize) * (height as usize) * 4, &shm)
             .map_err(|e| Error::Other(format!("shm pool: {e}")))?;
@@ -131,7 +143,8 @@ impl WlWin {
             compositor,
             shm,
             pool,
-            layer,
+            layer: None,
+            attached_output: None,
             events: VecDeque::new(),
             configured: false,
             closed: false,
@@ -144,7 +157,40 @@ impl WlWin {
             buffers: [None, None],
             buf_idx: 0,
         };
-        let _ = screen_origin;
+
+        // Need output events before pinning the layer to the captured monitor.
+        for _ in 0..16 {
+            event_queue
+                .blocking_dispatch(&mut state)
+                .map_err(|e| Error::Other(format!("wayland dispatch: {e}")))?;
+            if state.output_state.outputs().next().is_some() {
+                break;
+            }
+        }
+
+        let output = pick_output(&state, screen_origin, output_name);
+        if output.is_none() {
+            tracing::warn!(
+                output_name,
+                x = screen_origin.0,
+                y = screen_origin.1,
+                "no matching wl_output; compositor will pick"
+            );
+        }
+        let surface = state.compositor.create_surface(&qh);
+        let layer = layer_shell.create_layer_surface(
+            &qh,
+            surface,
+            Layer::Overlay,
+            Some("rustshot"),
+            output.as_ref(),
+        );
+        layer.set_anchor(Anchor::TOP | Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT);
+        layer.set_keyboard_interactivity(KeyboardInteractivity::Exclusive);
+        layer.set_exclusive_zone(-1);
+        layer.set_size(width as u32, height as u32);
+        layer.commit();
+        state.layer = Some(layer);
 
         // Wait for first configure (and seat capabilities).
         for _ in 0..64 {
@@ -204,20 +250,54 @@ impl WlWin {
         Ok(())
     }
 
-    pub fn wait_event(&mut self) -> Result<WlEvent> {
-        while self.state.events.is_empty() && !self.state.closed {
+    pub fn wait_event(&mut self, cancel: &AtomicBool) -> Result<WlEvent> {
+        loop {
+            if self.state.closed || cancel.load(Ordering::Acquire) {
+                return Ok(WlEvent::KeyPress {
+                    keysym: KS_ESCAPE,
+                    ctrl: false,
+                    shift: false,
+                });
+            }
             self.event_queue
-                .blocking_dispatch(&mut self.state)
+                .dispatch_pending(&mut self.state)
                 .map_err(|e| Error::Other(format!("wayland dispatch: {e}")))?;
+            if let Some(ev) = self.state.events.pop_front() {
+                return Ok(ev);
+            }
+            if self.state.closed || cancel.load(Ordering::Acquire) {
+                return Ok(WlEvent::KeyPress {
+                    keysym: KS_ESCAPE,
+                    ctrl: false,
+                    shift: false,
+                });
+            }
+            self.event_queue
+                .flush()
+                .map_err(|e| Error::Other(format!("wayland flush: {e}")))?;
+            let Some(guard) = self.event_queue.prepare_read() else {
+                continue;
+            };
+            let mut pfd = libc::pollfd {
+                fd: guard.connection_fd().as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            };
+            let n = unsafe { libc::poll(&mut pfd, 1, 200) };
+            if n < 0 {
+                let err = std::io::Error::last_os_error();
+                if err.kind() == std::io::ErrorKind::Interrupted {
+                    continue;
+                }
+                return Err(Error::Other(format!("wayland poll: {err}")));
+            }
+            if n == 0 {
+                continue;
+            }
+            if let Err(e) = guard.read() {
+                return Err(Error::Other(format!("wayland read: {e}")));
+            }
         }
-        if self.state.closed {
-            return Ok(WlEvent::KeyPress {
-                keysym: KS_ESCAPE,
-                ctrl: false,
-                shift: false,
-            });
-        }
-        Ok(self.state.events.pop_front().expect("event"))
     }
 
     pub fn poll_event(&mut self) -> Result<Option<WlEvent>> {
@@ -272,7 +352,12 @@ fn draw(
     if !can_reuse {
         let (buffer, _) = state
             .pool
-            .create_buffer(width as i32, height as i32, stride, wl_shm::Format::Argb8888)
+            .create_buffer(
+                width as i32,
+                height as i32,
+                stride,
+                wl_shm::Format::Argb8888,
+            )
             .map_err(|e| Error::Other(format!("create buffer: {e}")))?;
         state.buffers[idx] = Some(buffer);
     }
@@ -293,31 +378,30 @@ fn draw(
         }
     }
 
+    let layer = state
+        .layer
+        .as_ref()
+        .ok_or_else(|| Error::Other("layer surface missing".into()))?;
     match dirty {
         Some((x, y, w, h)) => {
-            state
-                .layer
+            layer
                 .wl_surface()
                 .damage_buffer(x as i32, y as i32, w as i32, h as i32);
         }
         None => {
-            state
-                .layer
+            layer
                 .wl_surface()
                 .damage_buffer(0, 0, width as i32, height as i32);
         }
     }
 
-    state
-        .layer
-        .wl_surface()
-        .frame(qh, state.layer.wl_surface().clone());
+    layer.wl_surface().frame(qh, layer.wl_surface().clone());
     state.buffers[idx]
         .as_ref()
         .unwrap()
-        .attach_to(state.layer.wl_surface())
+        .attach_to(layer.wl_surface())
         .map_err(|e| Error::Other(format!("attach: {e:?}")))?;
-    state.layer.commit();
+    layer.commit();
     state.buf_idx = 1 - idx;
     Ok(())
 }
@@ -355,8 +439,9 @@ impl CompositorHandler for WinState {
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
         _surface: &wl_surface::WlSurface,
-        _output: &wl_output::WlOutput,
+        output: &wl_output::WlOutput,
     ) {
+        self.attached_output = Some(output.clone());
     }
 
     fn surface_leave(
@@ -364,8 +449,11 @@ impl CompositorHandler for WinState {
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
         _surface: &wl_surface::WlSurface,
-        _output: &wl_output::WlOutput,
+        output: &wl_output::WlOutput,
     ) {
+        if self.attached_output.as_ref() == Some(output) {
+            self.attached_output = None;
+        }
     }
 }
 
@@ -375,7 +463,18 @@ impl OutputHandler for WinState {
     }
     fn new_output(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {}
     fn update_output(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {}
-    fn output_destroyed(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {}
+    fn output_destroyed(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        output: wl_output::WlOutput,
+    ) {
+        // Fullscreen exclusive / mode changes can destroy the output the
+        // overlay is on. Treat that as close so PrintScr is not stuck.
+        if self.attached_output.as_ref() == Some(&output) {
+            self.closed = true;
+        }
+    }
 }
 
 impl LayerShellHandler for WinState {
@@ -539,7 +638,10 @@ impl PointerHandler for WinState {
     ) {
         use PointerEventKind::*;
         for event in events {
-            if &event.surface != self.layer.wl_surface() {
+            let Some(layer) = self.layer.as_ref() else {
+                continue;
+            };
+            if &event.surface != layer.wl_surface() {
                 continue;
             }
             let x = event.position.0 as f32;
@@ -556,10 +658,12 @@ impl PointerHandler for WinState {
                     self.events.push_back(WlEvent::Motion { x, y, ctrl, shift });
                 }
                 Press { button, .. } if button == BTN_LEFT => {
-                    self.events.push_back(WlEvent::ButtonPress { x, y, ctrl, shift });
+                    self.events
+                        .push_back(WlEvent::ButtonPress { x, y, ctrl, shift });
                 }
                 Release { button, .. } if button == BTN_LEFT => {
-                    self.events.push_back(WlEvent::ButtonRelease { x, y, ctrl, shift });
+                    self.events
+                        .push_back(WlEvent::ButtonRelease { x, y, ctrl, shift });
                 }
                 Press { .. } | Release { .. } | Axis { .. } => {}
             }
@@ -587,4 +691,20 @@ impl ProvidesRegistryState for WinState {
         &mut self.registry_state
     }
     registry_handlers![OutputState, SeatState];
+}
+
+fn pick_output(state: &WinState, origin: (i32, i32), name: &str) -> Option<wl_output::WlOutput> {
+    let mut by_origin = None;
+    for output in state.output_state.outputs() {
+        let Some(info) = state.output_state.info(&output) else {
+            continue;
+        };
+        if !name.is_empty() && info.name.as_deref() == Some(name) {
+            return Some(output);
+        }
+        if info.location == origin {
+            by_origin = Some(output);
+        }
+    }
+    by_origin
 }

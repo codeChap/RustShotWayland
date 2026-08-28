@@ -8,6 +8,8 @@
 [defaults]
 counter_radius = 16.0                    # auto-counter bubble radius
 pixelate_block = 10                      # pixelate block size in px (min 2)
+# If omitted, save_dir is the OS Pictures folder (XDG PICTURES / user-dirs.dirs)
+# plus a "screenshots" subdirectory — not a hardcoded ~/Pictures.
 save_dir = "~/Pictures/screenshots"      # used when no -p flag is given
 filename_pattern = "%Y%m%d-%H%M%S.png"   # strftime format for auto-generated filenames
 
@@ -20,8 +22,9 @@ include_cursor = false   # include the pointer in single-output captures (libway
 # The on-disk copy is great for pasting screenshots into Grok, Claude, Cursor,
 # Windsurf, etc. on Linux: even if the receiving app can't handle raw image/png
 # from the clipboard, you can reliably reference the file with
-# @~/Pictures/screenshots/rustshot-latest.png
+# @Pictures/screenshots/rustshot-latest.png
 #
+# If omitted, this is <OS Pictures>/screenshots/rustshot-latest.png.
 # Set to "" to disable the on-disk copy. The path is deliberately not placed on
 # the clipboard: wl-copy is image/png only so pasting still yields the image.
 latest_path = "~/Pictures/screenshots/rustshot-latest.png"

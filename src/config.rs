@@ -23,7 +23,7 @@ impl Default for Defaults {
         Self {
             counter_radius: 16.0,
             pixelate_block: 10,
-            save_dir: "~/Pictures/screenshots".into(),
+            save_dir: default_save_dir(),
             filename_pattern: "%Y%m%d-%H%M%S.png".into(),
         }
     }
@@ -40,8 +40,7 @@ pub struct CaptureCfg {
 pub struct Clipboard {
     /// When copying to the clipboard, also write a copy of the final image to
     /// this path on disk. This is the reliable way to paste screenshots into AI
-    /// tools that don't read `image/png` from the clipboard well — reference the
-    /// file with `@~/Pictures/screenshots/rustshot-latest.png`. Empty disables it.
+    /// tools that don't read `image/png` from the clipboard well. Empty disables it.
     ///
     /// The path is intentionally not also placed on the clipboard — `wl-copy`
     /// is invoked as `image/png` only so pasting still yields the image.
@@ -51,7 +50,7 @@ pub struct Clipboard {
 impl Default for Clipboard {
     fn default() -> Self {
         Self {
-            latest_path: "~/Pictures/screenshots/rustshot-latest.png".into(),
+            latest_path: default_latest_path(),
         }
     }
 }
@@ -82,6 +81,33 @@ impl Config {
     }
 }
 
+/// OS Pictures folder (XDG `PICTURES` / `user-dirs.dirs` on Linux, Known Folder
+/// on Windows). Falls back to `~/Pictures`, then a relative `Pictures`.
+fn pictures_dir() -> PathBuf {
+    if let Some(p) = dirs::picture_dir() {
+        return p;
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join("Pictures");
+    }
+    PathBuf::from("Pictures")
+}
+
+fn default_save_dir() -> String {
+    pictures_dir()
+        .join("screenshots")
+        .to_string_lossy()
+        .into_owned()
+}
+
+fn default_latest_path() -> String {
+    pictures_dir()
+        .join("screenshots")
+        .join("rustshot-latest.png")
+        .to_string_lossy()
+        .into_owned()
+}
+
 fn config_path() -> PathBuf {
     dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("."))
@@ -109,4 +135,61 @@ pub fn expand_tilde(p: &str) -> PathBuf {
         }
     }
     PathBuf::from(p)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_save_dir_follows_os_pictures() {
+        let dir = PathBuf::from(default_save_dir());
+        assert_eq!(
+            dir.file_name().and_then(|s| s.to_str()),
+            Some("screenshots")
+        );
+        if let Some(pictures) = dirs::picture_dir() {
+            assert_eq!(dir, pictures.join("screenshots"));
+        }
+    }
+
+    #[test]
+    fn default_latest_path_sits_in_the_same_folder() {
+        let latest = PathBuf::from(default_latest_path());
+        assert_eq!(
+            latest.file_name().and_then(|s| s.to_str()),
+            Some("rustshot-latest.png")
+        );
+        assert_eq!(latest.parent().unwrap(), PathBuf::from(default_save_dir()));
+    }
+
+    #[test]
+    fn expand_tilde_still_resolves_home() {
+        let home = dirs::home_dir().expect("home");
+        assert_eq!(expand_tilde("~/Pictures"), home.join("Pictures"));
+        assert_eq!(expand_tilde("~"), home);
+        assert_eq!(
+            expand_tilde("/tmp/shot.png"),
+            PathBuf::from("/tmp/shot.png")
+        );
+    }
+
+    #[test]
+    fn serde_missing_save_dir_uses_os_pictures() {
+        let c: Config = toml::from_str("").unwrap();
+        assert_eq!(c.defaults.save_dir, default_save_dir());
+        assert_eq!(c.clipboard.latest_path, default_latest_path());
+    }
+
+    #[test]
+    fn serde_explicit_save_dir_wins() {
+        let c: Config = toml::from_str(
+            r#"
+            [defaults]
+            save_dir = "/tmp/shots"
+            "#,
+        )
+        .unwrap();
+        assert_eq!(c.defaults.save_dir, "/tmp/shots");
+    }
 }

@@ -9,9 +9,7 @@ const FONT_BYTES: &[u8] = include_bytes!("../../assets/font.ttf");
 
 pub(crate) fn font() -> &'static FontRef<'static> {
     static FONT: std::sync::OnceLock<FontRef<'static>> = std::sync::OnceLock::new();
-    FONT.get_or_init(|| {
-        FontRef::try_from_slice(FONT_BYTES).expect("embedded font is valid TTF")
-    })
+    FONT.get_or_init(|| FontRef::try_from_slice(FONT_BYTES).expect("embedded font is valid TTF"))
 }
 
 /// Pass 2 + 3: vector primitives via tiny-skia, then counter text via imageproc.
@@ -24,11 +22,7 @@ pub fn rasterize_overlays(img: &mut RgbaImage, annotations: &[Annotation]) {
 
 /// Rasterize into `img`, treating `img`'s (0,0) as screen-space `origin`.
 /// Tiny-skia clips to `img`; that's the 2D dirty-rect path.
-pub fn rasterize_overlays_at(
-    img: &mut RgbaImage,
-    annotations: &[Annotation],
-    origin: Pos,
-) {
+pub fn rasterize_overlays_at(img: &mut RgbaImage, annotations: &[Annotation], origin: Pos) {
     if annotations.is_empty() {
         return;
     }
@@ -45,11 +39,20 @@ pub fn rasterize_overlays_at(
         };
         for a in annotations {
             match a {
-                Annotation::Pixelate { .. } | Annotation::Stamp { .. } => {}
-                Annotation::Pencil { points, color, width } => {
+                Annotation::Pixelate { .. } | Annotation::Spotlight { .. } => {}
+                Annotation::Pencil {
+                    points,
+                    color,
+                    width,
+                } => {
                     draw_polyline(&mut pixmap, points, *color, *width, origin);
                 }
-                Annotation::Line { start, end, color, width } => {
+                Annotation::Line {
+                    start,
+                    end,
+                    color,
+                    width,
+                } => {
                     draw_line(
                         &mut pixmap,
                         shift(*start, origin),
@@ -58,7 +61,12 @@ pub fn rasterize_overlays_at(
                         *width,
                     );
                 }
-                Annotation::Arrow { start, end, color, width } => {
+                Annotation::Arrow {
+                    start,
+                    end,
+                    color,
+                    width,
+                } => {
                     draw_arrow(
                         &mut pixmap,
                         shift(*start, origin),
@@ -73,10 +81,20 @@ pub fn rasterize_overlays_at(
                 Annotation::Ellipse { rect, color, width } => {
                     draw_ellipse_outline(&mut pixmap, shift_bounds(*rect, origin), *color, *width);
                 }
-                Annotation::Counter { center, color, radius, .. } => {
+                Annotation::Counter {
+                    center,
+                    color,
+                    radius,
+                    ..
+                } => {
                     draw_counter_circle(&mut pixmap, shift(*center, origin), *color, *radius);
                 }
-                Annotation::Widget { kind, rect, color, width } => {
+                Annotation::Widget {
+                    kind,
+                    rect,
+                    color,
+                    width,
+                } => {
                     draw_widget(
                         &mut pixmap,
                         *kind,
@@ -92,11 +110,13 @@ pub fn rasterize_overlays_at(
     let font = font();
     for a in annotations {
         match a {
-            Annotation::Counter { center, number, color, radius } => {
+            Annotation::Counter {
+                center,
+                number,
+                color,
+                radius,
+            } => {
                 draw_counter_text(img, shift(*center, origin), *number, *color, *radius, font);
-            }
-            Annotation::Stamp { center, ch, color, size } => {
-                draw_stamp_text(img, shift(*center, origin), *ch, *color, *size, font);
             }
             Annotation::Widget {
                 kind: WidgetKind::Measure,
@@ -129,7 +149,9 @@ fn shift_bounds(b: Bounds, origin: Pos) -> Bounds {
 
 fn paint_for(color: Rgba<u8>) -> Paint<'static> {
     let mut p = Paint::default();
-    p.set_color(Color::from_rgba8(color.0[0], color.0[1], color.0[2], color.0[3]));
+    p.set_color(Color::from_rgba8(
+        color.0[0], color.0[1], color.0[2], color.0[3],
+    ));
     p.anti_alias = true;
     p
 }
@@ -271,13 +293,19 @@ pub(crate) fn draw_widget(
             draw_line(
                 pixmap,
                 Pos { x: c.x, y: rect.y },
-                Pos { x: c.x, y: rect.y + tick },
+                Pos {
+                    x: c.x,
+                    y: rect.y + tick,
+                },
                 color,
                 width,
             );
             draw_line(
                 pixmap,
-                Pos { x: rect.right(), y: c.y },
+                Pos {
+                    x: rect.right(),
+                    y: c.y,
+                },
                 Pos {
                     x: rect.right() - tick,
                     y: c.y,
@@ -476,22 +504,49 @@ fn draw_times_cross(img: &mut RgbaImage, cx: f32, cy: f32, half: f32, color: Rgb
     );
 }
 
-fn draw_stamp_text(
-    img: &mut RgbaImage,
-    center: Pos,
-    ch: char,
-    color: Rgba<u8>,
-    size: f32,
-    font: &impl Font,
+/// Copy the axis-aligned `rect` from `src` into `dst`. `dst`'s (0,0) is
+/// screen-space `origin`. When `clip` is set, pixels outside that AABB are
+/// left untouched (so a hole cannot light up the dim backdrop outside the
+/// selection).
+pub fn copy_rect_at(
+    src: &RgbaImage,
+    dst: &mut RgbaImage,
+    rect: Bounds,
+    origin: Pos,
+    clip: Option<Bounds>,
 ) {
-    draw_centered_text(
-        img,
-        center,
-        &ch.to_string(),
-        color,
-        ab_glyph::PxScale::from(size),
-        font,
-    );
+    let box_r = match clip {
+        Some(c) => match rect.intersection(c) {
+            Some(b) => b,
+            None => return,
+        },
+        None => rect,
+    };
+    let Some((sx, sy, sw, sh)) = box_r.to_px(src.width(), src.height()) else {
+        return;
+    };
+    let ox = origin.x.max(0.0) as u32;
+    let oy = origin.y.max(0.0) as u32;
+    let dw = dst.width();
+    let dh = dst.height();
+    let ix = sx.max(ox);
+    let iy = sy.max(oy);
+    let ir = (sx + sw).min(ox.saturating_add(dw));
+    let ib = (sy + sh).min(oy.saturating_add(dh));
+    if ir <= ix || ib <= iy {
+        return;
+    }
+    let w = (ir - ix) as usize;
+    let h = ib - iy;
+    let sraw = src.as_raw();
+    let draw = dst.as_mut();
+    let src_stride = src.width() as usize;
+    let dst_stride = dw as usize;
+    for row in 0..h as usize {
+        let so = ((sy as usize + (iy - sy) as usize + row) * src_stride + ix as usize) * 4;
+        let doff = ((iy - oy) as usize + row) * dst_stride * 4 + (ix - ox) as usize * 4;
+        draw[doff..doff + w * 4].copy_from_slice(&sraw[so..so + w * 4]);
+    }
 }
 
 /// Crop + pixelate a region via downscale→upscale (nearest). Returns the clamped
@@ -653,12 +708,6 @@ mod tests {
                 color: Rgba([0, 0, 255, 255]),
                 radius: 14.0,
             },
-            Annotation::Stamp {
-                center: Pos { x: 120.0, y: 60.0 },
-                ch: '!',
-                color: Rgba([255, 255, 0, 255]),
-                size: 18.0,
-            },
             Annotation::Widget {
                 kind: WidgetKind::Button,
                 rect: Bounds {
@@ -669,6 +718,14 @@ mod tests {
                 },
                 color: Rgba([255, 50, 50, 255]),
                 width: 4.0,
+            },
+            Annotation::Spotlight {
+                rect: Bounds {
+                    x: 140.0,
+                    y: 20.0,
+                    w: 40.0,
+                    h: 30.0,
+                },
             },
         ];
 
@@ -714,11 +771,17 @@ mod tests {
     fn rasterize_checkbox_and_toggle_paint() {
         let bg = Rgba([0, 0, 0, 255]);
         let mut img = solid_image(80, 50, bg);
-        rasterize_overlays(&mut img, &[widget(WidgetKind::Checkbox, 8.0, 8.0, 36.0, 36.0)]);
+        rasterize_overlays(
+            &mut img,
+            &[widget(WidgetKind::Checkbox, 8.0, 8.0, 36.0, 36.0)],
+        );
         assert!(img.pixels().any(|p| p.0 != bg.0), "checkbox should ink");
 
         let mut img = solid_image(100, 40, bg);
-        rasterize_overlays(&mut img, &[widget(WidgetKind::Toggle, 10.0, 8.0, 80.0, 24.0)]);
+        rasterize_overlays(
+            &mut img,
+            &[widget(WidgetKind::Toggle, 10.0, 8.0, 80.0, 24.0)],
+        );
         let (knob, _) = widget::toggle_knob(Bounds {
             x: 10.0,
             y: 8.0,
@@ -733,11 +796,36 @@ mod tests {
     }
 
     #[test]
+    fn copy_rect_at_punches_square_and_leaves_outside() {
+        let src = solid_image(40, 40, Rgba([200, 10, 10, 255]));
+        let dim = Rgba([20, 20, 20, 255]);
+        let mut dst = solid_image(40, 40, dim);
+        copy_rect_at(
+            &src,
+            &mut dst,
+            Bounds {
+                x: 10.0,
+                y: 10.0,
+                w: 20.0,
+                h: 20.0,
+            },
+            Pos { x: 0.0, y: 0.0 },
+            None,
+        );
+        assert_eq!(dst.get_pixel(20, 20), src.get_pixel(20, 20));
+        assert_eq!(dst.get_pixel(10, 10), src.get_pixel(10, 10));
+        assert_eq!(dst.get_pixel(0, 0), &dim);
+        assert_eq!(dst.get_pixel(9, 10), &dim);
+    }
+
+    #[test]
     fn rasterize_measure_paints_outline_and_digits() {
         let bg = Rgba([0, 0, 0, 255]);
         let mut img = solid_image(160, 60, bg);
-        rasterize_overlays(&mut img, &[widget(WidgetKind::Measure, 10.0, 10.0, 140.0, 40.0)]);
+        rasterize_overlays(
+            &mut img,
+            &[widget(WidgetKind::Measure, 10.0, 10.0, 140.0, 40.0)],
+        );
         assert!(img.pixels().any(|p| p.0 != bg.0), "measure should ink");
     }
 }
-

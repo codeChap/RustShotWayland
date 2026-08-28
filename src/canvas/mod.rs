@@ -3,8 +3,8 @@ pub mod render;
 pub mod widget;
 
 pub use geometry::{Bounds, Pos};
-pub use widget::WidgetKind;
 use image::Rgba;
+pub use widget::WidgetKind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ToolKind {
@@ -16,14 +16,12 @@ pub enum ToolKind {
     Ellipse,
     Pixelate,
     Counter,
-    Exclaim,
-    Question,
-    Asterisk,
+    Spotlight,
     Widget(WidgetKind),
 }
 
 impl ToolKind {
-    pub const ALL: [ToolKind; 17] = [
+    pub const ALL: [ToolKind; 15] = [
         ToolKind::Pencil,
         ToolKind::Highlighter,
         ToolKind::Line,
@@ -32,9 +30,7 @@ impl ToolKind {
         ToolKind::Ellipse,
         ToolKind::Pixelate,
         ToolKind::Counter,
-        ToolKind::Exclaim,
-        ToolKind::Question,
-        ToolKind::Asterisk,
+        ToolKind::Spotlight,
         ToolKind::Widget(WidgetKind::ALL[0]),
         ToolKind::Widget(WidgetKind::ALL[1]),
         ToolKind::Widget(WidgetKind::ALL[2]),
@@ -42,17 +38,6 @@ impl ToolKind {
         ToolKind::Widget(WidgetKind::ALL[4]),
         ToolKind::Widget(WidgetKind::ALL[5]),
     ];
-
-    /// Single-char stamp dropped by this tool, if any. `None` means the tool
-    /// is not a stamp (drag-based, or Counter which handles its own glyph).
-    pub fn stamp_char(self) -> Option<char> {
-        match self {
-            ToolKind::Exclaim => Some('!'),
-            ToolKind::Question => Some('?'),
-            ToolKind::Asterisk => Some('*'),
-            _ => None,
-        }
-    }
 
     /// Drag-to-size widget stamp, if any.
     pub fn widget_kind(self) -> Option<WidgetKind> {
@@ -111,18 +96,16 @@ pub enum Annotation {
         rect: Bounds,
         block: u32,
     },
+    /// Axis-aligned rect that stays at full brightness; the rest of the crop
+    /// is dimmed. No stroke.
+    Spotlight {
+        rect: Bounds,
+    },
     Counter {
         center: Pos,
         number: u32,
         color: Rgba<u8>,
         radius: f32,
-    },
-    /// Bare single-char stamp (e.g. !, ?, *). No bubble, no auto-increment.
-    Stamp {
-        center: Pos,
-        ch: char,
-        color: Rgba<u8>,
-        size: f32,
     },
     /// Drag-to-size UI mock (button / input / image-X / checkbox / toggle / measure).
     Widget {
@@ -208,30 +191,24 @@ mod tests {
     }
 
     #[test]
-    fn toolkind_stamp_char() {
-        assert_eq!(ToolKind::Exclaim.stamp_char(), Some('!'));
-        assert_eq!(ToolKind::Question.stamp_char(), Some('?'));
-        assert_eq!(ToolKind::Asterisk.stamp_char(), Some('*'));
-        assert_eq!(ToolKind::Pencil.stamp_char(), None);
-        assert_eq!(ToolKind::Counter.stamp_char(), None);
-    }
-
-    #[test]
-    fn toolkind_all_has_17_items() {
-        assert_eq!(ToolKind::ALL.len(), 17);
-        let widgets: Vec<_> = ToolKind::ALL.iter().filter_map(|t| t.widget_kind()).collect();
+    fn toolkind_all_has_15_items() {
+        assert_eq!(ToolKind::ALL.len(), 15);
+        assert_eq!(ToolKind::ALL[8], ToolKind::Spotlight);
+        let widgets: Vec<_> = ToolKind::ALL
+            .iter()
+            .filter_map(|t| t.widget_kind())
+            .collect();
         assert_eq!(widgets.as_slice(), &WidgetKind::ALL);
     }
 
     #[test]
-    fn widget_tools_are_not_stamps_and_map_to_kinds() {
+    fn widget_tools_map_to_kinds() {
         for &kind in &WidgetKind::ALL {
             let tool = ToolKind::Widget(kind);
-            assert_eq!(tool.stamp_char(), None);
             assert_eq!(tool.widget_kind(), Some(kind));
         }
         assert_eq!(ToolKind::Rect.widget_kind(), None);
-        assert_eq!(ToolKind::Asterisk.widget_kind(), None);
+        assert_eq!(ToolKind::Spotlight.widget_kind(), None);
     }
 
     #[test]
@@ -303,7 +280,13 @@ mod tests {
     fn undo_redo_multiple() {
         let mut c = Canvas::default();
         for i in 0..3 {
-            c.push(sample_counter(Pos { x: i as f32, y: 0.0 }, i));
+            c.push(sample_counter(
+                Pos {
+                    x: i as f32,
+                    y: 0.0,
+                },
+                i,
+            ));
         }
         assert_eq!(c.annotations.len(), 3);
 
@@ -359,7 +342,10 @@ mod tests {
         assert_eq!(c.counter, 0);
 
         c.redo();
-        assert_eq!(c.counter, 1, "redo of a counter annotation should increment the live counter");
+        assert_eq!(
+            c.counter, 1,
+            "redo of a counter annotation should increment the live counter"
+        );
     }
 
     #[test]

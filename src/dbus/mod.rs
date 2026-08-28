@@ -16,6 +16,7 @@ pub struct Service {
     pub config: Arc<Config>,
     pub ui_tx: Sender<UiRequest>,
     pub gui_busy: Arc<AtomicBool>,
+    pub overlay_cancel: Arc<AtomicBool>,
 }
 
 #[interface(name = "org.rustshot.Wayland")]
@@ -37,21 +38,16 @@ impl Service {
         no_save: bool,
         _id: String,
     ) -> zbus::fdo::Result<()> {
-        // One overlay at a time. If a repeated PrtSc arrives while an overlay
-        // is already up, drop it silently instead of letting captures queue.
-        let Some(guard) = BusyGuard::acquire(&self.gui_busy) else {
-            tracing::info!("capture ignored — overlay already active");
-            return Ok(());
-        };
         let resolved = resolve_save_path(path, no_save, &self.config);
         gui_capture(
             self.capture.clone(),
             self.config.clone(),
             self.ui_tx.clone(),
+            self.gui_busy.clone(),
+            self.overlay_cancel.clone(),
             resolved,
             clipboard,
             delay,
-            guard,
         )
         .await
     }
@@ -169,15 +165,24 @@ async fn gui_capture(
     capture: Arc<WaylandCapture>,
     config: Arc<Config>,
     ui_tx: Sender<UiRequest>,
+    gui_busy: Arc<AtomicBool>,
+    overlay_cancel: Arc<AtomicBool>,
     path: String,
     clipboard: bool,
     delay: u32,
-    busy_guard: BusyGuard,
 ) -> zbus::fdo::Result<()> {
     let t0 = std::time::Instant::now();
     sleep_delay(delay).await;
     let resp_rx = run_blocking(move || {
-        submit_overlay(capture.as_ref(), config, &ui_tx, path, clipboard, busy_guard)
+        submit_overlay(
+            capture.as_ref(),
+            config,
+            &ui_tx,
+            path,
+            clipboard,
+            gui_busy,
+            overlay_cancel,
+        )
     })
     .await?;
     let result = resp_rx
@@ -207,7 +212,8 @@ pub fn submit_overlay(
     ui_tx: &Sender<UiRequest>,
     save_path: String,
     clipboard: bool,
-    busy_guard: BusyGuard,
+    gui_busy: Arc<AtomicBool>,
+    overlay_cancel: Arc<AtomicBool>,
 ) -> anyhow::Result<tokio::sync::oneshot::Receiver<UiResult>> {
     let t0 = std::time::Instant::now();
     let include_cursor = config.capture.include_cursor;
@@ -216,14 +222,27 @@ pub fn submit_overlay(
     let image = capture.capture_screen_with_cursor(&screen, include_cursor)?;
     let t_capture = std::time::Instant::now();
 
+    // Capture is done; only then take the overlay slot. A hung screencopy
+    // must not keep PrintScr dead. If an overlay is already up (including a
+    // stuck invisible one), ask it to close and steal the slot.
+    let Some(busy_guard) = BusyGuard::acquire_or_steal(
+        &gui_busy,
+        &overlay_cancel,
+        std::time::Duration::from_secs(2),
+    ) else {
+        anyhow::bail!("overlay already active");
+    };
+
     let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
     ui_tx.send(UiRequest::ShowOverlay {
         image,
         screen_origin: (screen.x, screen.y),
+        output_name: screen.name.clone(),
         save_path,
         clipboard,
         config,
         result_tx: resp_tx,
+        cancel: overlay_cancel,
         _busy_guard: Some(busy_guard),
     })?;
     let t_send = std::time::Instant::now();
